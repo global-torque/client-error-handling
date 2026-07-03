@@ -6,6 +6,7 @@ import {
   normalizeBrowserErrorEvent,
   normalizeClientError,
   normalizeUnhandledRejection,
+  sanitizeValue,
 } from './index';
 
 describe('client-error-handling', () => {
@@ -108,5 +109,49 @@ describe('client-error-handling', () => {
     reporter.report(normalized);
 
     expect(reporter.reports).toHaveLength(1);
+  });
+
+  it('handles circular metadata and depth limits without leaking raw objects', () => {
+    const circular: Record<string, unknown> = { safe: 'visible' };
+    circular.self = circular;
+
+    expect(sanitizeValue(circular)).toEqual({
+      safe: 'visible',
+      self: '[circular]',
+    });
+    expect(sanitizeValue({ one: { two: { three: true } } }, { maxDepth: 2 })).toEqual({
+      one: {
+        two: '[truncated]',
+      },
+    });
+  });
+
+  it('redacts sensitive query parameters in nested string values', () => {
+    const sanitized = sanitizeValue({
+      redirect: 'https://example.test/callback?token=secret&next=/safe',
+      nested: {
+        apiKey: 'secret-key',
+      },
+    });
+
+    expect(JSON.stringify(sanitized)).not.toContain('secret-key');
+    expect(JSON.stringify(sanitized)).not.toContain('token=secret');
+    expect(JSON.stringify(sanitized)).toContain('next=%2Fsafe');
+  });
+
+  it('expires dedupe fingerprints after the configured ttl', () => {
+    let now = 1_000;
+    const filter = createDedupeFilter({
+      now: () => now,
+      ttlMs: 100,
+    });
+    const error = { fingerprint: 'Error|same' };
+
+    expect(filter.accept(error)).toBe(true);
+    expect(filter.accept(error)).toBe(false);
+
+    now = 1_200;
+
+    expect(filter.accept(error)).toBe(true);
   });
 });
