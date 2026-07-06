@@ -1,4 +1,4 @@
-import { sanitizeContext } from "./sanitize.js";
+import { sanitizeContext } from './sanitize.js';
 function getObjectValue(value, key) {
     if (value === null || typeof value !== 'object') {
         return undefined;

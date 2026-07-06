@@ -1,4 +1,4 @@
-import type { SerializableValue } from './types.ts';
+import type { SerializableValue } from './types.js';
 
 export interface SanitizeOptions {
   maxDepth?: number;

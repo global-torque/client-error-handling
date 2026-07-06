@@ -1,4 +1,4 @@
-import type { ClientErrorReporter, NormalizedClientError } from './types.ts';
+import type { ClientErrorReporter, NormalizedClientError } from './types.js';
 export declare function createMemoryErrorReporter(): {
     reports: NormalizedClientError[];
     report(error: NormalizedClientError): void;

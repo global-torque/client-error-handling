@@ -1,5 +1,5 @@
-import { sanitizeContext, type SanitizeOptions } from './sanitize.ts';
-import type { ClientErrorContext, NormalizedClientError } from './types.ts';
+import { sanitizeContext, type SanitizeOptions } from './sanitize.js';
+import type { ClientErrorContext, NormalizedClientError } from './types.js';
 
 export interface NormalizeClientErrorOptions {
   now?: () => Date;

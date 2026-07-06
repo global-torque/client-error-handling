@@ -1,4 +1,4 @@
-import type { NormalizedClientError } from './types.ts';
+import type { NormalizedClientError } from './types.js';
 
 export interface DedupeOptions {
   ttlMs?: number;

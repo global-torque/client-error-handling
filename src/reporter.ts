@@ -1,7 +1,7 @@
 import type {
   ClientErrorReporter,
   NormalizedClientError,
-} from './types.ts';
+} from './types.js';
 
 export function createMemoryErrorReporter() {
   const reports: NormalizedClientError[] = [];
