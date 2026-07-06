@@ -59,3 +59,31 @@ adapters through the `ClientErrorReporter` contract.
 
 Prepare-next. Do not publish to npm until the OpenSpec release gates for the
 error package track are complete.
+
+## Support
+
+Use GitHub issues on `global-torque/client-error-handling` for normalization,
+redaction, reporter contract, and dedupe behavior requests. Framework adapters,
+analytics transports, and product-specific telemetry wiring belong in the host
+repository until they are proven generic.
+
+## Security
+
+Report suspected vulnerabilities through the repository security policy in
+`SECURITY.md`. Do not include raw customer data, request payloads, tokens,
+cookies, authorization headers, private URLs, or stack traces that expose
+secrets in public issues.
+
+## Changelog And Versioning
+
+Release notes live in `CHANGELOG.md`. The package stays in `0.x` while the
+normalization schema, sanitizer defaults, reporter interfaces, and dedupe
+behavior are stabilized. Breaking schema or redaction changes may ship as minor
+`0.x` releases before a stable `1.0` contract.
+
+## Ownership And Feedback
+
+Global Torque owns the framework-free error core. Host apps own transport,
+sampling, UI messaging, session/profile context, and backend observability
+adapters. Feedback should separate reusable core behavior from private host
+integration requirements.
