@@ -12,6 +12,7 @@ jobs:
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-24.04
     permissions:
+      artifact-metadata: write
       attestations: write
       contents: read
       id-token: write
@@ -46,10 +47,19 @@ jobs:
           mkdir release
           pnpm pack --pack-destination release
           node scripts/create-release-manifest.mjs release
+      - name: Select SHA-512 subject checksum
+        id: subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          checksums=(release/*.tgz.sha512)
+          test "${#checksums[@]}" -eq 1
+          printf 'checksums=%s\\n' "${checksums[0]}" >> "${GITHUB_OUTPUT}"
       - name: Attest candidate
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
-          subject-path: release/*.tgz
+          subject-checksums: ${{ steps.subject.outputs.checksums }}
       - name: Download offline attestation bundle
         env:
           GH_TOKEN: ${{ github.token }}
