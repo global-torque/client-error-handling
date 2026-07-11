@@ -78,6 +78,7 @@ jobs:
             if (cd release && gh attestation download "$(basename "${artifact}")" --repo "${GITHUB_REPOSITORY}" --digest-alg sha512); then
               exit 0
             fi
+            printf 'attestation bundle not available (attempt %s/5)\n' "${attempt}" >&2
             sleep 5
           done
           exit 1
@@ -92,15 +93,15 @@ jobs:
           bundles=(release/sha512:*.jsonl release/sha512-*.jsonl)
           test "${#artifacts[@]}" -eq 1
           test "${#bundles[@]}" -eq 1
-          gh attestation verify "${artifacts[0]}" \\
-            --bundle "${bundles[0]}" \\
-            --repo "${GITHUB_REPOSITORY}" \\
-            --digest-alg sha512 \\
-            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/candidate.yml" \\
-            --signer-digest "${GITHUB_SHA}" \\
-            --source-digest "${GITHUB_SHA}" \\
-            --source-ref "${GITHUB_REF}" \\
-            --deny-self-hosted-runners \\
+          gh attestation verify "${artifacts[0]}" \
+            --bundle "${bundles[0]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --digest-alg sha512 \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/candidate.yml" \
+            --signer-digest "${GITHUB_SHA}" \
+            --source-digest "${GITHUB_SHA}" \
+            --source-ref "${GITHUB_REF}" \
+            --deny-self-hosted-runners \
             --format json > /dev/null
       - name: Retain exact candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
