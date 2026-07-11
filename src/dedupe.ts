@@ -1,46 +1,91 @@
-import type { NormalizedClientError } from './types.ts';
+import type { NormalizedClientError } from './types.js';
 
+/** Bounded fingerprint dedupe policy. @public */
 export interface DedupeOptions {
-  ttlMs?: number;
-  maxEntries?: number;
-  now?: () => number;
+  /** Exact fingerprint lifetime in milliseconds. Defaults to 60 seconds. */
+  readonly ttlMs?: number;
+  /** Maximum remembered fingerprints. Defaults to 250. */
+  readonly maxEntries?: number;
+  /** Injectable finite millisecond clock. */
+  readonly now?: () => number;
 }
 
-const DEFAULT_TTL_MS = 60_000;
-const DEFAULT_MAX_ENTRIES = 250;
+/** Dedupe filter contract. @public */
+export interface DedupeFilter {
+  /** Remember a new fingerprint, returning `false` for a live duplicate. */
+  accept(error: Pick<NormalizedClientError, 'fingerprint'>): boolean;
+  /** Remove one fingerprint, for example after a later pipeline gate rejects. */
+  forget(fingerprint: string): void;
+  /** Remove every remembered fingerprint. */
+  clear(): void;
+  /** Return the current bounded entry count. */
+  size(): number;
+}
 
-export function createDedupeFilter({
-  ttlMs = DEFAULT_TTL_MS,
-  maxEntries = DEFAULT_MAX_ENTRIES,
-  now = () => Date.now(),
-}: DedupeOptions = {}) {
+function positiveInteger(
+  value: number | undefined,
+  fallback: number,
+  name: string,
+): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new TypeError(`${name} must be a positive safe integer.`);
+  }
+  return resolved;
+}
+
+/** Create an exact-TTL, insertion-ordered bounded dedupe filter. @public */
+export function createDedupeFilter(input: DedupeOptions = {}): DedupeFilter {
+  const {
+    ttlMs: rawTtlMs,
+    maxEntries: rawMaxEntries,
+    now = () => Date.now(),
+  } = input;
+  const ttlMs = positiveInteger(rawTtlMs, 60_000, 'ttlMs');
+  const maxEntries = positiveInteger(rawMaxEntries, 250, 'maxEntries');
   const seen = new Map<string, number>();
 
-  function prune(currentTime: number) {
-    for (const [fingerprint, timestamp] of seen.entries()) {
-      if (currentTime - timestamp > ttlMs || seen.size > maxEntries) {
-        seen.delete(fingerprint);
-      }
+  const currentTime = (): number => {
+    const value = now();
+    if (!Number.isFinite(value))
+      throw new TypeError('now must return a finite number.');
+    return value;
+  };
+
+  const pruneExpired = (time: number): void => {
+    for (const [fingerprint, createdAt] of seen) {
+      if (time - createdAt >= ttlMs) seen.delete(fingerprint);
     }
-  }
+  };
 
-  return {
+  const pruneCapacity = (): void => {
+    while (seen.size >= maxEntries) {
+      const oldest = seen.keys().next().value;
+      if (oldest === undefined) break;
+      seen.delete(oldest);
+    }
+  };
+
+  return Object.freeze({
     accept(error: Pick<NormalizedClientError, 'fingerprint'>): boolean {
-      const currentTime = now();
-      prune(currentTime);
-
-      if (seen.has(error.fingerprint)) {
-        return false;
+      if (typeof error.fingerprint !== 'string' || error.fingerprint === '') {
+        throw new TypeError('fingerprint must be a non-empty string.');
       }
-
-      seen.set(error.fingerprint, currentTime);
+      const time = currentTime();
+      pruneExpired(time);
+      if (seen.has(error.fingerprint)) return false;
+      pruneCapacity();
+      seen.set(error.fingerprint, time);
       return true;
     },
-    clear() {
+    clear(): void {
       seen.clear();
     },
-    size() {
+    forget(fingerprint: string): void {
+      seen.delete(fingerprint);
+    },
+    size(): number {
       return seen.size;
     },
-  };
+  });
 }

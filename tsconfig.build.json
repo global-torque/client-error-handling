@@ -3,20 +3,15 @@
   "compilerOptions": {
     "allowImportingTsExtensions": true,
     "declaration": true,
-    "declarationMap": true,
+    "declarationMap": false,
     "emitDeclarationOnly": false,
     "noEmit": false,
     "outDir": "dist",
     "rootDir": "src",
     "rewriteRelativeImportExtensions": true,
     "sourceMap": true,
-    "types": [
-      "node"
-    ]
+    "inlineSources": true,
+    "types": ["node"]
   },
-  "exclude": [
-    "src/**/*.spec.ts",
-    "src/**/*.test.ts",
-    "vitest.config.ts"
-  ]
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "vitest.config.ts"]
 }

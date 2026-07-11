@@ -1,4 +1,5 @@
 # Notices
 
-This package is original Global Torque/Webdevelop code released under the MIT
-license when its prepare-next gates are complete.
+The `@global-torque/client-error-handling` package code and generated artifacts
+are Copyright (c) Global Torque contributors and are licensed under the MIT
+License included in this distribution.

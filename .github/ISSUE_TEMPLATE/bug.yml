@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible package defect
+title: 'bug: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not disclose vulnerabilities here. Use private vulnerability reporting from the Security tab.
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      placeholder: 0.2.0-beta.1
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Runtime
+      placeholder: Node 24.18.0, pnpm 10.33.0
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide code or a public repository that demonstrates the defect.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

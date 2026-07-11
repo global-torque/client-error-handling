@@ -1,22 +1,20 @@
 name: CI
 
 on:
-  push:
   pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   package:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
-      - run: pnpm run typecheck
-      - run: pnpm run test:run
-      - run: pnpm pack --dry-run
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: global-torque/.github/.github/workflows/public-package-ci.yml@aad63ce2f9587ed59117c89c1660b9d8a76ee7d3
