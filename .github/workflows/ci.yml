@@ -17,4 +17,4 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: global-torque/.github/.github/workflows/public-package-ci.yml@aad63ce2f9587ed59117c89c1660b9d8a76ee7d3
+    uses: global-torque/.github/.github/workflows/public-package-ci.yml@f7e52d2b087e061ef7177ca448f7e32fedd51ac8

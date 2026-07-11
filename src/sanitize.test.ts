@@ -100,6 +100,14 @@ describe('transport sanitization', () => {
       expect(sanitized).toContain('[redacted]');
     }
     expect(sanitizeText('card 4111-1111-1111-1111')).toBe('card [redacted]');
+    expect(sanitizeText('@example.test')).toBe('@example.test');
+    expect(sanitizeText('a@b.c1')).toBe('a@b.c1');
+    expect(sanitizeText('user1@example.test')).toBe('[redacted]');
+    expect(
+      sanitizeText(`${'%'.repeat(20_000)}@example.test`, {
+        maxStringLength: 21_000,
+      }),
+    ).toBe('[redacted]');
   });
 
   it('distinguishes cycles from shared references and neutralizes prototype keys', () => {

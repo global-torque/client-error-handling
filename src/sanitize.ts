@@ -193,16 +193,98 @@ function redactKnownSecrets(
     );
 }
 
+function isAsciiLetter(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isEmailLocalCharacter(code: number): boolean {
+  return (
+    isAsciiLetter(code) ||
+    (code >= 48 && code <= 57) ||
+    code === 37 ||
+    code === 43 ||
+    code === 45 ||
+    code === 46 ||
+    code === 95
+  );
+}
+
+function isEmailDomainCharacter(code: number): boolean {
+  return (
+    isAsciiLetter(code) ||
+    (code >= 48 && code <= 57) ||
+    code === 45 ||
+    code === 46
+  );
+}
+
+function redactEmailAddresses(value: string, replacement: string): string {
+  let copiedThrough = 0;
+  let searchFrom = 0;
+  let redacted = '';
+
+  while (searchFrom < value.length) {
+    const at = value.indexOf('@', searchFrom);
+    if (at === -1) break;
+
+    let start = at;
+    while (
+      start > copiedThrough &&
+      isEmailLocalCharacter(value.charCodeAt(start - 1))
+    ) {
+      start -= 1;
+    }
+    if (start === at) {
+      searchFrom = at + 1;
+      continue;
+    }
+
+    let cursor = at + 1;
+    let lastDot = -1;
+    let tldLetters = 0;
+    let tldContainsOnlyLetters = true;
+    let validEnd = -1;
+    while (
+      cursor < value.length &&
+      isEmailDomainCharacter(value.charCodeAt(cursor))
+    ) {
+      const code = value.charCodeAt(cursor);
+      if (code === 46) {
+        lastDot = cursor;
+        tldLetters = 0;
+        tldContainsOnlyLetters = true;
+      } else if (lastDot >= at + 2) {
+        if (tldContainsOnlyLetters && isAsciiLetter(code)) {
+          tldLetters += 1;
+          if (tldLetters >= 2) validEnd = cursor + 1;
+        } else {
+          tldContainsOnlyLetters = false;
+        }
+      }
+      cursor += 1;
+    }
+
+    if (validEnd === -1) {
+      searchFrom = at + 1;
+      continue;
+    }
+
+    redacted += value.slice(copiedThrough, start) + replacement;
+    copiedThrough = validEnd;
+    searchFrom = cursor;
+  }
+
+  return redacted + value.slice(copiedThrough);
+}
+
 function redactPersonalData(
   value: string,
   options: ResolvedSanitizeOptions,
 ): string {
-  return value
-    .replace(
-      /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
-      options.redactValue,
-    )
-    .replace(/\b(?:\d[\s-]?){10,}\d?\b/g, options.redactValue);
+  return redactEmailAddresses(value, options.redactValue).replace(
+    /\b(?:\d[\s-]?){10,}\d?\b/g,
+    options.redactValue,
+  );
 }
 
 function redactInspectableText(
