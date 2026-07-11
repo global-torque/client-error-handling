@@ -47,6 +47,7 @@ const sha512 = (filePath) =>
   crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('hex');
 const walk = (directory) =>
   fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.name === 'node_modules') return [];
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) return walk(entryPath);
     return [entryPath];
@@ -74,7 +75,13 @@ try {
     ),
   );
 
-  const installSpecs = ['typescript@6.0.3', ...dependencySpecs, artifactPath];
+  const fixtureArtifactPath = path.join(fixture, 'candidate.tgz');
+  fs.copyFileSync(artifactPath, fixtureArtifactPath);
+  const installSpecs = [
+    'typescript@6.0.3',
+    ...dependencySpecs,
+    fixtureArtifactPath,
+  ];
   if (manager === 'npm') {
     run(
       'npm',
