@@ -1,6 +1,9 @@
 name: Candidate artifact
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
