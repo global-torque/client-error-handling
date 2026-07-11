@@ -269,8 +269,15 @@ function redactEmailAddresses(value: string, replacement: string): string {
       continue;
     }
 
+    let redactionEnd = cursor;
+    while (
+      redactionEnd > validEnd &&
+      value.charCodeAt(redactionEnd - 1) === 46
+    ) {
+      redactionEnd -= 1;
+    }
     redacted += value.slice(copiedThrough, start) + replacement;
-    copiedThrough = validEnd;
+    copiedThrough = redactionEnd;
     searchFrom = cursor;
   }
 

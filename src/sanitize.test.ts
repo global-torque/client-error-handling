@@ -103,6 +103,14 @@ describe('transport sanitization', () => {
     expect(sanitizeText('@example.test')).toBe('@example.test');
     expect(sanitizeText('a@b.c1')).toBe('a@b.c1');
     expect(sanitizeText('user1@example.test')).toBe('[redacted]');
+    for (const email of [
+      'user@example.com1',
+      'user@example.com-secret',
+      'user@example.xn--p1ai',
+    ]) {
+      expect(sanitizeText(email)).toBe('[redacted]');
+    }
+    expect(sanitizeText('user@example.test.')).toBe('[redacted].');
     expect(
       sanitizeText(`${'%'.repeat(20_000)}@example.test`, {
         maxStringLength: 21_000,
