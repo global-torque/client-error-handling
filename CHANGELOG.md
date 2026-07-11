@@ -2,9 +2,11 @@
 
 ## 0.1.0-beta.3 - Unreleased
 
-- Moved the independently reviewed privacy-safe source to protected public
+- Prepared the independently reviewed privacy-safe source for protected public
   `main` with SHA-pinned CI, public API governance, clean-source artifact
   manifests, and provenance workflow.
+- Replaced the email detector with a linear scanner and adversarial long-input
+  coverage after CodeQL rejected the previous backtracking expression.
 - Supersedes the dirty-tree beta.2 implementation artifact; beta.2 remains
   historical local evidence and must not be uploaded or retagged.
 
