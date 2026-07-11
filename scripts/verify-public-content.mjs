@@ -47,7 +47,7 @@ function walkFiles(directory) {
   });
 }
 
-function validateManifest(root) {
+function validateManifest(root, options) {
   const manifestPath = path.join(root, 'package.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const errors = [];
@@ -60,7 +60,7 @@ function validateManifest(root) {
   if (manifest.engines?.node !== '>=22') {
     errors.push('package.json must declare engines.node as >=22');
   }
-  if (manifest.packageManager !== 'pnpm@10.33.0') {
+  if (!options.packed && manifest.packageManager !== 'pnpm@10.33.0') {
     errors.push('package.json must pin packageManager to pnpm@10.33.0');
   }
   if (!Object.hasOwn(manifest, 'sideEffects')) {
@@ -109,9 +109,9 @@ function validateManifest(root) {
   return manifest;
 }
 
-export function verifyPublicContent(rootDirectory) {
+export function verifyPublicContent(rootDirectory, options = {}) {
   const root = path.resolve(rootDirectory);
-  const manifest = validateManifest(root);
+  const manifest = validateManifest(root, { packed: options.packed === true });
   const decoder = new TextDecoder('utf-8', { fatal: true });
 
   for (const filePath of walkFiles(root)) {
