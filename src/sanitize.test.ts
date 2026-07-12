@@ -101,7 +101,7 @@ describe('transport sanitization', () => {
     }
     expect(sanitizeText('card 4111-1111-1111-1111')).toBe('card [redacted]');
     expect(sanitizeText('@example.test')).toBe('@example.test');
-    expect(sanitizeText('a@b.c1')).toBe('a@b.c1');
+    expect(sanitizeText('a@b.c1')).toBe('[redacted]');
     expect(sanitizeText('user1@example.test')).toBe('[redacted]');
     for (const email of [
       'user@example.com1',
@@ -135,6 +135,15 @@ describe('transport sanitization', () => {
       'first."last"@example.com',
       'very.unusual."@".unusual.com@example.com',
       'first..last@example.com',
+      'john.smith(comment)@example.com',
+      'john.smith @example.com',
+      'john.smith@(comment)example.com',
+      'john@(a(b)c)example.com',
+      'john@(a\\)b)example.com',
+      'postmaster@mailserver1',
+      'first (local). "last" @ (domain)example . com',
+      'john(a(b)c)@example.com',
+      'john(a\\)b)@example.com',
       'user@[192.0.2.1]',
     ]) {
       expect(sanitizeText(email)).toBe('[redacted]');
@@ -142,10 +151,15 @@ describe('transport sanitization', () => {
     expect(sanitizeText('contact élise@example.com now')).toBe(
       'contact [redacted] now',
     );
+    expect(sanitizeText(' john@example.com')).toBe(' [redacted]');
     expect(sanitizeText('用户@example.com-secret')).toBe('[redacted]');
     expect(sanitizeText('user@example.test.')).toBe('[redacted].');
     expect(sanitizeText('user@example.com。')).toBe('[redacted]。');
     expect(sanitizeText('john"@example.com')).toBe('john"@example.com');
+    expect(sanitizeText('john)@example.com')).toBe('john)@example.com');
+    expect(sanitizeText('john@(commentexample.com')).toBe(
+      'john@(commentexample.com',
+    );
     expect(sanitizeText('"john\ndoe"@example.com')).toBe(
       '"john\ndoe"@example.com',
     );

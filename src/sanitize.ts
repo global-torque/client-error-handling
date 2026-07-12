@@ -222,13 +222,6 @@ function isEmailDomainCharacter(character: string): boolean {
   );
 }
 
-function isEmailTldLetter(character: string): boolean {
-  const code = Number(character.codePointAt(0));
-  return (
-    isAsciiLetter(code) || (code > 127 && /^[\p{L}\p{M}]$/u.test(character))
-  );
-}
-
 function isEmailDot(character: string): boolean {
   return (
     character === '.' ||
@@ -254,6 +247,93 @@ function previousCodePointStart(value: string, index: number): number {
 
 function codePointCharacterAt(value: string, index: number): string {
   return String.fromCodePoint(Number(value.codePointAt(index)));
+}
+
+function isEmailFoldingWhitespace(code: number): boolean {
+  return code === 9 || code === 10 || code === 13 || code === 32;
+}
+
+function emailCommentStart(
+  value: string,
+  end: number,
+  minimum: number,
+): number {
+  let depth = 0;
+  let cursor = end - 1;
+  while (cursor >= minimum) {
+    const code = value.charCodeAt(cursor);
+    if (code === 40 || code === 41) {
+      let slash = cursor - 1;
+      while (slash >= minimum && value.charCodeAt(slash) === 92) slash -= 1;
+      if ((cursor - slash - 1) % 2 === 1) {
+        cursor = slash;
+      } else if (code === 41) {
+        depth += 1;
+      } else {
+        depth -= 1;
+        if (depth === 0) return cursor;
+      }
+    }
+    cursor -= 1;
+  }
+  return -1;
+}
+
+function emailCommentEnd(value: string, start: number): number {
+  let depth = 0;
+  let cursor = start;
+  while (cursor < value.length) {
+    const code = value.charCodeAt(cursor);
+    if (code === 92) {
+      cursor += 2;
+      continue;
+    }
+    if (code === 40) depth += 1;
+    if (code === 41) {
+      depth -= 1;
+      if (depth === 0) return cursor + 1;
+    }
+    cursor += 1;
+  }
+  return -1;
+}
+
+function skipEmailCfwsBackward(
+  value: string,
+  end: number,
+  minimum: number,
+): number {
+  let cursor = end;
+  while (cursor > minimum) {
+    while (
+      cursor > minimum &&
+      isEmailFoldingWhitespace(value.charCodeAt(cursor - 1))
+    ) {
+      cursor -= 1;
+    }
+    if (cursor <= minimum || value.charCodeAt(cursor - 1) !== 41) break;
+    const commentStart = emailCommentStart(value, cursor, minimum);
+    if (commentStart === -1) break;
+    cursor = commentStart;
+  }
+  return cursor;
+}
+
+function skipEmailCfwsForward(value: string, start: number): number {
+  let cursor = start;
+  while (cursor < value.length) {
+    while (
+      cursor < value.length &&
+      isEmailFoldingWhitespace(value.charCodeAt(cursor))
+    ) {
+      cursor += 1;
+    }
+    if (value.charCodeAt(cursor) !== 40) break;
+    const commentEnd = emailCommentEnd(value, cursor);
+    if (commentEnd === -1) break;
+    cursor = commentEnd;
+  }
+  return cursor;
 }
 
 function quotedEmailLocalStart(
@@ -284,30 +364,74 @@ function emailLocalWordStart(
   end: number,
   minimum: number,
 ): number {
-  if (end <= minimum) return -1;
-  if (value.charCodeAt(end - 1) === 34) {
-    return quotedEmailLocalStart(value, end, minimum);
+  const wordEnd = skipEmailCfwsBackward(value, end, minimum);
+  if (wordEnd <= minimum) return -1;
+  if (value.charCodeAt(wordEnd - 1) === 34) {
+    return quotedEmailLocalStart(value, wordEnd, minimum);
   }
-  let cursor = end;
+  let cursor = wordEnd;
   while (cursor > minimum) {
     const candidateStart = previousCodePointStart(value, cursor);
     const character = value.slice(candidateStart, cursor);
     if (isEmailDot(character) || !isEmailLocalCharacter(character)) break;
     cursor = candidateStart;
   }
-  return cursor < end ? cursor : -1;
+  return cursor < wordEnd ? cursor : -1;
 }
 
 function emailLocalStart(value: string, at: number, minimum: number): number {
   let start = emailLocalWordStart(value, at, minimum);
   if (start === -1) return -1;
   while (start > minimum) {
-    const dotStart = previousCodePointStart(value, start);
-    if (!isEmailDot(value.slice(dotStart, start))) break;
+    const separatorEnd = skipEmailCfwsBackward(value, start, minimum);
+    if (separatorEnd <= minimum) break;
+    const dotStart = previousCodePointStart(value, separatorEnd);
+    if (!isEmailDot(value.slice(dotStart, separatorEnd))) break;
     const previousWord = emailLocalWordStart(value, dotStart, minimum);
     start = previousWord === -1 ? dotStart : previousWord;
   }
   return start;
+}
+
+function emailDomainMatch(
+  value: string,
+  start: number,
+): { end: number; scannedThrough: number } | null {
+  let cursor = skipEmailCfwsForward(value, start);
+  if (value.charCodeAt(cursor) === 91) {
+    const literalEnd = value.indexOf(']', cursor + 1);
+    if (
+      literalEnd > cursor + 1 &&
+      !/[\s\r\n]/u.test(value.slice(cursor + 1, literalEnd))
+    ) {
+      return { end: literalEnd + 1, scannedThrough: literalEnd + 1 };
+    }
+    return null;
+  }
+
+  let validEnd = -1;
+  while (cursor < value.length) {
+    cursor = skipEmailCfwsForward(value, cursor);
+    const labelStart = cursor;
+    while (cursor < value.length) {
+      const character = codePointCharacterAt(value, cursor);
+      if (isEmailDot(character) || !isEmailDomainCharacter(character)) break;
+      cursor += character.length;
+    }
+    if (cursor > labelStart) validEnd = cursor;
+    const separatorStart = skipEmailCfwsForward(value, cursor);
+    if (separatorStart >= value.length) {
+      cursor = separatorStart;
+      break;
+    }
+    const separator = codePointCharacterAt(value, separatorStart);
+    if (!isEmailDot(separator)) {
+      cursor = separatorStart;
+      break;
+    }
+    cursor = separatorStart + separator.length;
+  }
+  return validEnd === -1 ? null : { end: validEnd, scannedThrough: cursor };
 }
 
 function redactEmailAddresses(value: string, replacement: string): string {
@@ -325,50 +449,14 @@ function redactEmailAddresses(value: string, replacement: string): string {
       continue;
     }
 
-    let cursor = at + 1;
-    let lastDot = -1;
-    let tldLetters = 0;
-    let validEnd = -1;
-    if (value.charCodeAt(cursor) === 91) {
-      const literalEnd = value.indexOf(']', cursor + 1);
-      if (
-        literalEnd > cursor + 1 &&
-        !/[\s\r\n]/u.test(value.slice(cursor + 1, literalEnd))
-      ) {
-        redacted += value.slice(copiedThrough, start) + replacement;
-        copiedThrough = literalEnd + 1;
-        searchFrom = copiedThrough;
-        continue;
-      }
-    }
-    while (cursor < value.length) {
-      const character = codePointCharacterAt(value, cursor);
-      if (!isEmailDomainCharacter(character)) break;
-      const nextCursor = cursor + character.length;
-      if (isEmailDot(character)) {
-        lastDot = cursor;
-        tldLetters = 0;
-      } else if (lastDot >= at + 2 && isEmailTldLetter(character)) {
-        tldLetters += 1;
-        if (tldLetters >= 2) validEnd = nextCursor;
-      }
-      cursor = nextCursor;
-    }
-
-    if (validEnd === -1) {
+    const domain = emailDomainMatch(value, at + 1);
+    if (domain === null) {
       searchFrom = at + 1;
       continue;
     }
-
-    let redactionEnd = cursor;
-    while (redactionEnd > validEnd) {
-      const previous = previousCodePointStart(value, redactionEnd);
-      if (!isEmailDot(value.slice(previous, redactionEnd))) break;
-      redactionEnd = previous;
-    }
     redacted += value.slice(copiedThrough, start) + replacement;
-    copiedThrough = redactionEnd;
-    searchFrom = cursor;
+    copiedThrough = domain.end;
+    searchFrom = domain.scannedThrough;
   }
 
   return redacted + value.slice(copiedThrough);
