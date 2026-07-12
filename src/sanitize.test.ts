@@ -82,6 +82,62 @@ describe('transport sanitization', () => {
     );
   });
 
+  it('uses opaque URL redaction sentinels instead of caller-controlled markers', () => {
+    for (const { path, redactValue, secret } of [
+      { path: 'axb', redactValue: 'x', secret: 'axb' },
+      {
+        path: 'abc%5Bredacted%5Ddef',
+        redactValue: '[redacted]',
+        secret: 'abc[redacted]def',
+      },
+      {
+        path: 'abc--MASK--def',
+        redactValue: '--MASK--',
+        secret: 'abc--MASK--def',
+      },
+    ]) {
+      const options = { redactValue, redactValues: [secret] };
+      const expectedUrl = `https://example.test/${encodeURIComponent(redactValue)}`;
+      expect(sanitizeUrl(`https://example.test/${path}`, options)).toBe(
+        expectedUrl,
+      );
+      expect(sanitizeText(`failed https://example.test/${path}`, options)).toBe(
+        `failed ${expectedUrl}`,
+      );
+    }
+  });
+
+  it('fails closed when every bounded internal marker nonce collides', () => {
+    const collisions = (prefix: string, suffix: string) =>
+      Array.from(
+        { length: 1_024 },
+        (_, nonce) => `\u000b${prefix}${String(nonce)}${suffix}`,
+      ).join('');
+    const options = { maxStringLength: 100_000 };
+
+    expect(
+      sanitizeUrl(collisions('gt-url-redaction-', '\u000b'), options),
+    ).toBe('[redacted]');
+    expect(
+      sanitizeText(collisions('gt-text-redaction-', '\u000b'), options),
+    ).toBe('[redacted]');
+    expect(sanitizeText(collisions('gt-sanitized-url-', '-'), options)).toBe(
+      '[redacted]',
+    );
+  });
+
+  it('scans long percent-free text and generic scheme tokens linearly', () => {
+    const plainText = 'a'.repeat(64_000);
+    expect(
+      sanitizeText(plainText, {
+        maxStringLength: 65_000,
+      }),
+    ).toBe(plainText);
+    expect(sanitizeText(`${'a'.repeat(33)}://private.example/path`)).toBe(
+      '[redacted]',
+    );
+  });
+
   it('redacts complete configured secrets before truncation and quoted assignments', () => {
     const secret = `CANARY_${'S'.repeat(100)}`;
     expect(
@@ -115,6 +171,8 @@ describe('transport sanitization', () => {
       'user@例え.テスト',
       'emoji😀@example.com',
       'e\u0301@example.com',
+      'کاربر\u200cنام@example.com',
+      'user@نامه\u200cای.example',
       'o’connor@example.com',
       '用户。测试@example.com',
       'user@example。com',
@@ -140,17 +198,69 @@ describe('transport sanitization', () => {
       'john.smith@(comment)example.com',
       'john@(a(b)c)example.com',
       'john@(a\\)b)example.com',
+      'john@((\\)))example.com',
       'postmaster@mailserver1',
       'first (local). "last" @ (domain)example . com',
       'john(a(b)c)@example.com',
       'john(a\\)b)@example.com',
+      'john((\\)))@example.com',
+      'john(a(b\\(c)d)@example.com',
+      'john(a(b\\)c)d)@example.com',
+      String.raw`john(a\\b)@example.com`,
+      String.raw`john(a\\\b)@example.com`,
+      String.raw`(a\\b)john@example.com`,
+      String.raw`john@example.com(a\\b)`,
+      'john(https://private.example/path)@example.com',
+      'john(comment //private.example/path)@example.com',
+      '(https://private.example/path)john@example.com',
+      'john@example.com(https://private.example/path)',
+      '"https://private.example/path"@example.com',
+      '"//private.example/path"@example.com',
+      '"john\r\n doe"@example.com',
+      '"john\r\n\tdoe"@example.com',
       'user@[192.0.2.1]',
+      'user@[192.0.2. 1]',
+      'user@[ 192.0.2.1 ]',
+      'user@[\r\n 192.0.2.1]',
+      'user@[a\r\n\t b]',
+      'user@[foo\\]bar]',
+      'user@[]',
+      'user@[https://private.example/path]',
+      'user@[//private.example/path]',
+      '"john@example.org"@example.com',
+      'john(note@work)@example.com',
+      'john(contact other@example.org)@example.com',
+      '(Alice)john@example.com',
+      'john@example.com(Alice)',
     ]) {
       expect(sanitizeText(email)).toBe('[redacted]');
+    }
+    for (const [email, redactValues] of [
+      ['john@example.com', ['john']],
+      ['john@example.com', ['example']],
+      ['eyJabc.def.ghi@example.com', []],
+      ['john(token=secret)@example.com', []],
+      ['john(Bearer abc)@example.com', []],
+    ] satisfies readonly (readonly [string, readonly string[]])[]) {
+      expect(sanitizeText(email, { redactValues })).toBe('[redacted]');
+    }
+    for (const redactValue of [
+      'mailto:redacted@example.test',
+      'https://redacted.invalid/path?account=@hidden',
+    ]) {
+      expect(
+        sanitizeText('john(token=secret)@example.com', {
+          redactValue,
+          redactValues: ['john', 'example', 'secret'],
+        }),
+      ).toBe(redactValue);
     }
     expect(sanitizeText('contact élise@example.com now')).toBe(
       'contact [redacted] now',
     );
+    expect(
+      sanitizeText('failed at https://user:pass@example.test/private'),
+    ).toBe('failed at https://example.test/private');
     expect(sanitizeText(' john@example.com')).toBe(' [redacted]');
     expect(sanitizeText('用户@example.com-secret')).toBe('[redacted]');
     expect(sanitizeText('user@example.test.')).toBe('[redacted].');
@@ -166,12 +276,47 @@ describe('transport sanitization', () => {
     expect(sanitizeText('"john\rdoe"@example.com')).toBe(
       '"john\rdoe"@example.com',
     );
-    expect(sanitizeText('user@[192.0.2. 1]')).toBe('user@[192.0.2. 1]');
+    expect(sanitizeText('"john\r\ndoe"@example.com')).toBe(
+      '"john\r\ndoe"@example.com',
+    );
+    expect(sanitizeText('user@[192.0.2.\n1]')).toBe('user@[192.0.2.\n1]');
+    expect(sanitizeText('user@[a\rb]')).toBe('user@[a\rb]');
+    expect(sanitizeText('user@[a\r\nb]')).toBe('user@[a\r\nb]');
+    expect(sanitizeText('user@[unterminated')).toBe('user@[unterminated');
+    expect(sanitizeText('user@[unterminated\\')).toBe('user@[unterminated\\');
+    expect(sanitizeText('user@example.com(unclosed')).toBe(
+      '[redacted](unclosed',
+    );
+    expect(sanitizeText('user@example.com(other@example.org)')).toBe(
+      '[redacted]',
+    );
+    expect(sanitizeText('user@example.com (contact other@example.org)')).toBe(
+      '[redacted]',
+    );
     expect(
       sanitizeText(`${'%'.repeat(20_000)}@example.test`, {
         maxStringLength: 21_000,
       }),
     ).toBe('[redacted]');
+    for (const hostile of [
+      `@[${'a'.repeat(20)}`.repeat(3_000),
+      'local@('.repeat(3_000),
+      `${'a'.repeat(1_000)}@[`.repeat(64),
+    ]) {
+      expect(
+        sanitizeText(hostile, {
+          maxStringLength: 70_000,
+        }),
+      ).toBe('[redacted]');
+    }
+    expect(
+      sanitizeUrl(
+        `https://example.test/${`${'a'.repeat(1_000)}@[`.repeat(64)}`,
+        {
+          maxStringLength: 70_000,
+        },
+      ),
+    ).toBe('https://example.test/%5Bredacted%5D');
   });
 
   it('distinguishes cycles from shared references and neutralizes prototype keys', () => {
@@ -806,6 +951,28 @@ describe('transport sanitization', () => {
       expect(() => sanitizeValue('x', option)).toThrow(TypeError);
     }
     expect(() => sanitizeValue('x', { redactValue: '' })).toThrow(TypeError);
+    for (const malformedOptions of [
+      { redactValue: '\ud800' },
+      { redactValue: '\ud800x' },
+      { redactValue: 'x\ud800' },
+      { redactValues: ['\ud800'] },
+      { redactValue: '\udc00' },
+      { redactValue: '\udc00x' },
+      { redactValues: ['\udc00'] },
+    ]) {
+      expect(() => sanitizeText('plain text', malformedOptions)).toThrow(
+        TypeError,
+      );
+      expect(() =>
+        sanitizeUrl('https://example.test/path', malformedOptions),
+      ).toThrow(TypeError);
+    }
+    expect(
+      sanitizeText('secret', {
+        redactValue: '😀',
+        redactValues: ['secret'],
+      }),
+    ).toBe('😀');
     expect(() =>
       sanitizeValue('x', { sensitiveKeys: ['not-regexp'] as never }),
     ).toThrow(TypeError);

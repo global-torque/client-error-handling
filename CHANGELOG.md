@@ -10,6 +10,9 @@
 - Redacts EAI/IDN addresses, the full ASCII `atext` set, quoted and obsolete
   mixed local parts, CFWS/nested comments, domain literals, IDNA dot forms,
   and single-label domains without leaking identifying prefixes or suffixes.
+- Gives original-text mailbox ranges precedence over URL and secret matching,
+  preserves URL-shaped custom redaction markers through opaque sentinels, and
+  fails closed against a shared email scan-work budget to keep scanning linear.
 - Supersedes the dirty-tree beta.2 implementation artifact; beta.2 remains
   historical local evidence and must not be uploaded or retagged.
 

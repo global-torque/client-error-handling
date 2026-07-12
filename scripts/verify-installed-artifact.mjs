@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
+import {
+  collectInstalledExportCoverage,
+  verifyInstallDependencySpecs,
+} from './installed-export-policy.mjs';
+
 const releaseDirectory = path.resolve(process.argv[2] ?? 'release');
 const manager = process.argv[3];
 if (manager !== 'npm' && manager !== 'pnpm') {
@@ -29,6 +34,7 @@ const dependencySpecs = JSON.parse(
     'utf8',
   ),
 );
+verifyInstallDependencySpecs(manifest.package, dependencySpecs);
 
 const run = (command, commandArguments, options = {}) => {
   const result = spawnSync(command, commandArguments, {
@@ -124,23 +130,24 @@ try {
   const installedManifest = JSON.parse(
     fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'),
   );
-  const specifiers = Object.entries(installedManifest.exports ?? {})
-    .filter(([, target]) => {
-      const importTarget = typeof target === 'string' ? target : target?.import;
-      return typeof importTarget === 'string' && importTarget.endsWith('.js');
-    })
-    .map(([subpath]) =>
-      subpath === '.'
-        ? manifest.package
-        : `${manifest.package}/${subpath.replace(/^\.\//, '')}`,
-    );
-
-  const imports = specifiers
+  const { jsonSpecifiers, runtimeSpecifiers } = collectInstalledExportCoverage(
+    installedManifest,
+    manifest.package,
+    packageRoot,
+  );
+  const runtimeImports = runtimeSpecifiers
     .map(
       (specifier, index) =>
         `import * as export${index} from ${JSON.stringify(specifier)}; void export${index};`,
     )
     .join('\n');
+  const jsonImports = jsonSpecifiers
+    .map(
+      (specifier, index) =>
+        `import json${index} from ${JSON.stringify(specifier)} with { type: 'json' }; void json${index};`,
+    )
+    .join('\n');
+  const imports = `${runtimeImports}\n${jsonImports}`;
   fs.writeFileSync(path.join(fixture, 'smoke.mts'), `${imports}\n`);
   fs.writeFileSync(path.join(fixture, 'runtime.mjs'), `${imports}\n`);
 
@@ -151,6 +158,7 @@ try {
     noEmit: true,
     exactOptionalPropertyTypes: true,
     noUncheckedIndexedAccess: true,
+    resolveJsonModule: true,
   };
   for (const [name, compilerOptions] of [
     [
@@ -189,7 +197,7 @@ try {
       version: manifest.version,
       manager,
       node: process.version,
-      imports: specifiers.length,
+      imports: runtimeSpecifiers.length + jsonSpecifiers.length,
       files: installedFiles.length,
     }),
   );

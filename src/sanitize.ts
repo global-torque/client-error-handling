@@ -92,6 +92,20 @@ const DEFAULT_HEADER_KEYS = [
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const textEncoder = new TextEncoder();
 
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function positiveInteger(
   value: number | undefined,
   fallback: number,
@@ -120,11 +134,17 @@ function resolveOptions(
   if (typeof redactValue !== 'string' || redactValue.length === 0) {
     throw new TypeError('redactValue must be a non-empty string.');
   }
+  if (!isWellFormedUnicode(redactValue)) {
+    throw new TypeError('redactValue must contain well-formed Unicode.');
+  }
   const redactValues = (options.redactValues ?? [])
     .filter(
       (value): value is string => typeof value === 'string' && value !== '',
     )
     .sort((left, right) => right.length - left.length);
+  if (redactValues.some((value) => !isWellFormedUnicode(value))) {
+    throw new TypeError('redactValues must contain well-formed Unicode.');
+  }
   return {
     maxDepth: positiveInteger(options.maxDepth, 6, 'maxDepth'),
     maxArrayLength: positiveInteger(
@@ -176,25 +196,45 @@ function redactKnownSecrets(
 ): string {
   let result = value;
   for (const secret of options.redactValues) {
-    result = result.replaceAll(secret, options.redactValue);
+    result = transformOutsideReplacement(result, options.redactValue, (part) =>
+      part.replaceAll(secret, options.redactValue),
+    );
   }
-  return result
-    .replace(
+  result = transformOutsideReplacement(result, options.redactValue, (part) =>
+    part.replace(
       /\b(bearer|basic)\s+[^\s,;]+/gi,
       (_, scheme: string) => `${scheme} ${options.redactValue}`,
-    )
-    .replace(
+    ),
+  );
+  result = transformOutsideReplacement(result, options.redactValue, (part) =>
+    part.replace(
       /["']?\b(token|secret|password|passcode|api[-_ ]?key|authorization)\b["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi,
       (_, key: string) => `${key}=${options.redactValue}`,
-    )
-    .replace(
+    ),
+  );
+  return transformOutsideReplacement(result, options.redactValue, (part) =>
+    part.replace(
       /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
       options.redactValue,
-    );
+    ),
+  );
+}
+
+function transformOutsideReplacement(
+  value: string,
+  replacement: string,
+  transform: (part: string) => string,
+): string {
+  return value
+    .split(replacement)
+    .map((part, index) =>
+      index === 0 ? transform(part) : replacement + transform(part),
+    )
+    .join('');
 }
 
 const EMAIL_ASCII_LOCAL_CHARACTERS = new Set("!#$%&'*+-/=?^_`{|}~.");
-const UNICODE_EMAIL_TOKEN_CHARACTER = /^[^\p{Z}\p{C}]$/u;
+const MAX_EMAIL_SCAN_WORK = 262_144;
 
 function isAsciiLetter(code: number): boolean {
   return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
@@ -206,7 +246,7 @@ function isEmailLocalCharacter(character: string): boolean {
     isAsciiLetter(code) ||
     (code >= 48 && code <= 57) ||
     EMAIL_ASCII_LOCAL_CHARACTERS.has(character) ||
-    (code > 127 && UNICODE_EMAIL_TOKEN_CHARACTER.test(character))
+    code > 127
   );
 }
 
@@ -218,7 +258,7 @@ function isEmailDomainCharacter(character: string): boolean {
     code === 45 ||
     code === 46 ||
     code === 95 ||
-    (code > 127 && UNICODE_EMAIL_TOKEN_CHARACTER.test(character))
+    code > 127
   );
 }
 
@@ -266,7 +306,7 @@ function emailCommentStart(
       let slash = cursor - 1;
       while (slash >= minimum && value.charCodeAt(slash) === 92) slash -= 1;
       if ((cursor - slash - 1) % 2 === 1) {
-        cursor = slash;
+        cursor = slash + 1;
       } else if (code === 41) {
         depth += 1;
       } else {
@@ -344,7 +384,18 @@ function quotedEmailLocalStart(
   let cursor = end - 2;
   while (cursor >= minimum) {
     const code = value.charCodeAt(cursor);
-    if (code === 10 || code === 13) return -1;
+    if (code === 10) {
+      const validFold =
+        cursor > minimum &&
+        value.charCodeAt(cursor - 1) === 13 &&
+        cursor + 1 < end - 1 &&
+        (value.charCodeAt(cursor + 1) === 9 ||
+          value.charCodeAt(cursor + 1) === 32);
+      if (!validFold) return -1;
+      cursor -= 2;
+      continue;
+    }
+    if (code === 13) return -1;
     if (code === 34) {
       let slash = cursor - 1;
       while (slash >= minimum && value.charCodeAt(slash) === 92) slash -= 1;
@@ -393,20 +444,83 @@ function emailLocalStart(value: string, at: number, minimum: number): number {
   return start;
 }
 
+function emailDomainLiteralEnd(value: string, start: number): number {
+  let cursor = start + 1;
+  while (cursor < value.length) {
+    const code = value.charCodeAt(cursor);
+    if (code === 92) {
+      if (cursor + 1 >= value.length) return -1;
+      cursor += 2;
+      continue;
+    }
+    if (code === 93) return cursor + 1;
+    if (code === 13) {
+      if (
+        value.charCodeAt(cursor + 1) !== 10 ||
+        (value.charCodeAt(cursor + 2) !== 9 &&
+          value.charCodeAt(cursor + 2) !== 32)
+      ) {
+        return -1;
+      }
+      cursor += 3;
+      while (
+        value.charCodeAt(cursor) === 9 ||
+        value.charCodeAt(cursor) === 32
+      ) {
+        cursor += 1;
+      }
+      continue;
+    }
+    if (code === 10) return -1;
+    cursor += 1;
+  }
+  return -1;
+}
+
+function leadingEmailCfwsStart(
+  value: string,
+  start: number,
+  minimum: number,
+): number {
+  let probe = start;
+  while (
+    probe > minimum &&
+    isEmailFoldingWhitespace(value.charCodeAt(probe - 1))
+  ) {
+    probe -= 1;
+  }
+  return probe > minimum && value.charCodeAt(probe - 1) === 41
+    ? skipEmailCfwsBackward(value, start, minimum)
+    : start;
+}
+
+function trailingEmailCfwsEnd(value: string, end: number): number {
+  let cursor = end;
+  let lastCommentEnd = -1;
+  while (cursor < value.length) {
+    while (
+      cursor < value.length &&
+      isEmailFoldingWhitespace(value.charCodeAt(cursor))
+    ) {
+      cursor += 1;
+    }
+    if (value.charCodeAt(cursor) !== 40) break;
+    const commentEnd = emailCommentEnd(value, cursor);
+    if (commentEnd === -1) break;
+    lastCommentEnd = commentEnd;
+    cursor = commentEnd;
+  }
+  return lastCommentEnd === -1 ? end : lastCommentEnd;
+}
+
 function emailDomainMatch(
   value: string,
   start: number,
-): { end: number; scannedThrough: number } | null {
+): { end: number } | null {
   let cursor = skipEmailCfwsForward(value, start);
   if (value.charCodeAt(cursor) === 91) {
-    const literalEnd = value.indexOf(']', cursor + 1);
-    if (
-      literalEnd > cursor + 1 &&
-      !/[\s\r\n]/u.test(value.slice(cursor + 1, literalEnd))
-    ) {
-      return { end: literalEnd + 1, scannedThrough: literalEnd + 1 };
-    }
-    return null;
+    const literalEnd = emailDomainLiteralEnd(value, cursor);
+    return literalEnd === -1 ? null : { end: literalEnd };
   }
 
   let validEnd = -1;
@@ -431,34 +545,75 @@ function emailDomainMatch(
     }
     cursor = separatorStart + separator.length;
   }
-  return validEnd === -1 ? null : { end: validEnd, scannedThrough: cursor };
+  return validEnd === -1 ? null : { end: validEnd };
 }
 
-function redactEmailAddresses(value: string, replacement: string): string {
-  let copiedThrough = 0;
-  let searchFrom = 0;
-  let redacted = '';
+interface EmailAddressRange {
+  start: number;
+  end: number;
+}
 
-  while (searchFrom < value.length) {
-    const at = value.indexOf('@', searchFrom);
+function emailAddressRanges(value: string): EmailAddressRange[] | null {
+  const ranges: { start: number; end: number }[] = [];
+  let candidateCount = 0;
+  for (
+    let candidate = value.indexOf('@');
+    candidate !== -1;
+    candidate = value.indexOf('@', candidate + 1)
+  ) {
+    candidateCount += 1;
+    if (candidateCount > Math.floor(MAX_EMAIL_SCAN_WORK / value.length)) {
+      return null;
+    }
+  }
+  let searchBefore = value.length;
+  while (searchBefore > 0) {
+    const at = value.lastIndexOf('@', searchBefore - 1);
     if (at === -1) break;
 
-    const start = emailLocalStart(value, at, copiedThrough);
+    const start = emailLocalStart(value, at, 0);
     if (start === -1) {
-      searchFrom = at + 1;
+      searchBefore = at;
       continue;
     }
 
     const domain = emailDomainMatch(value, at + 1);
     if (domain === null) {
-      searchFrom = at + 1;
+      searchBefore = at;
       continue;
     }
-    redacted += value.slice(copiedThrough, start) + replacement;
-    copiedThrough = domain.end;
-    searchFrom = domain.scannedThrough;
+    const rangeStart = leadingEmailCfwsStart(value, start, 0);
+    ranges.push({
+      start: rangeStart,
+      end: trailingEmailCfwsEnd(value, domain.end),
+    });
+    searchBefore = rangeStart;
   }
 
+  if (ranges.length === 0) return [];
+  ranges.reverse();
+  const merged: EmailAddressRange[] = [];
+  for (const range of ranges) {
+    const previous = merged.at(-1);
+    if (previous !== undefined && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  return merged;
+}
+
+function redactEmailAddresses(value: string, replacement: string): string {
+  const ranges = emailAddressRanges(value);
+  if (ranges === null) return replacement;
+  if (ranges.length === 0) return value;
+  let copiedThrough = 0;
+  let redacted = '';
+  for (const range of ranges) {
+    redacted += value.slice(copiedThrough, range.start) + replacement;
+    copiedThrough = range.end;
+  }
   return redacted + value.slice(copiedThrough);
 }
 
@@ -482,24 +637,70 @@ function redactInspectableText(
 const MAX_URL_DECODE_PASSES = 16;
 const MAX_AMBIGUOUS_URL_INSPECTION_LENGTH = 1_024;
 const ABSOLUTE_TEXT_URL_PATTERN =
-  /(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|[a-z][a-z\d+.-]*:(?:\/\/|\\\\)|\/\/|\\\\)[^\s<>"']+/i;
+  /(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|(?<![a-z\d+.-])[a-z][a-z\d+.-]{0,31}:(?:\/\/|\\\\)|\/\/|\\\\)[^\s<>"']+/i;
 const IMMEDIATE_ABSOLUTE_URL_PATTERN =
-  /^\s+["'`<]?(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|[a-z][a-z\d+.-]*:(?:\/\/|\\\\)|\/\/|\\\\)/iu;
+  /^\s+["'`<]?(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|(?<![a-z\d+.-])[a-z][a-z\d+.-]{0,31}:(?:\/\/|\\\\)|\/\/|\\\\)/iu;
 const RAW_TEXT_URL_PATTERN =
-  /(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|[a-z][a-z\d+.-]*:(?:\/\/|\\\\)|\/\/|\\\\|(?<![\p{L}\p{N}\p{M}\p{Pc}\p{S}./\\-])(?:\.\.?\/|\/))[^\s]+/iu;
+  /(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|(?<![a-z\d+.-])[a-z][a-z\d+.-]{0,31}:(?:\/\/|\\\\)|\/\/|\\\\|(?<![\p{L}\p{N}\p{M}\p{Pc}\p{S}./\\-])(?:\.\.?\/|\/))[^\s]+/iu;
 const RAW_TEXT_URLS_PATTERN =
-  /(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|[a-z][a-z\d+.-]*:(?:\/\/|\\\\)|\/\/|\\\\|(?<![\p{L}\p{N}\p{M}\p{Pc}\p{S}./\\-])(?:\.\.?\/|\/))[^\s]+/giu;
+  /(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|(?<![a-z\d+.-])[a-z][a-z\d+.-]{0,31}:(?:\/\/|\\\\)|\/\/|\\\\|(?<![\p{L}\p{N}\p{M}\p{Pc}\p{S}./\\-])(?:\.\.?\/|\/))[^\s]+/giu;
 const RAW_URL_START_PATTERN =
-  /(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|[a-z][a-z\d+.-]*:(?:\/\/|\\\\)|\/\/|\\\\|(?<![\p{L}\p{N}\p{M}\p{Pc}\p{S}./\\-])(?:\.\.?\/|\/))/iu;
+  /(?:(?:https?|ftp|file|ws|wss|javascript|data|mailto|tel):(?:(?:\/\/|\\\\))?|(?<![a-z\d+.-])[a-z][a-z\d+.-]{0,31}:(?:\/\/|\\\\)|\/\/|\\\\|(?<![\p{L}\p{N}\p{M}\p{Pc}\p{S}./\\-])(?:\.\.?\/|\/))/iu;
 const RAW_CREDENTIAL_URLS_PATTERN =
-  /(?:(?:https?|ftp|file|ws|wss):[/\\]{0,2}|[a-z][a-z\d+.-]*:[/\\]{2}|[/\\]{2})[^:@/?#\\]*(?::[^@/?#\\]*)?@[^\s/?#\\]+[^\s]*/giu;
+  /(?:(?:https?|ftp|file|ws|wss):[/\\]{0,2}|(?<![a-z\d+.-])[a-z][a-z\d+.-]{0,31}:[/\\]{2}|[/\\]{2})[^:@/?#\\]*(?::[^@/?#\\]*)?@[^\s/?#\\]+[^\s]*/giu;
+const OVERLONG_AUTHORITY_SCHEME_PATTERN =
+  /(?<![a-z\d+.-])[a-z][a-z\d+.-]{32,}:(?:\/\/|\\\\)/iu;
 const RAW_URLS_PATTERN = new RegExp(
   `${RAW_CREDENTIAL_URLS_PATTERN.source}|${RAW_TEXT_URLS_PATTERN.source}`,
   'giu',
 );
-const PERCENT_ENCODED_TEXT_PATTERN = /[^\s]*%[^\s]{2}[^\s]*/i;
 const ASCII_PERCENT_ESCAPE_PATTERN = /%([0-7][0-9a-f])/gi;
 const SANITIZED_URL_MARKER_BOUNDARY = '\u000b';
+
+function containsOpaqueMarker(value: string, marker: string): boolean {
+  let inspected = value;
+  for (let pass = 0; pass <= MAX_URL_DECODE_PASSES; pass += 1) {
+    if (inspected.includes(marker)) return true;
+    const decoded = inspected.replace(
+      ASCII_PERCENT_ESCAPE_PATTERN,
+      (_, hexadecimal: string) =>
+        String.fromCharCode(Number.parseInt(hexadecimal, 16)),
+    );
+    if (decoded === inspected) return false;
+    inspected = decoded;
+  }
+  return false;
+}
+
+function createOpaqueRedactionMarker(
+  value: string,
+  options: ResolvedSanitizeOptions,
+  namespace: string,
+): string | undefined {
+  for (let nonce = 0; nonce < 1_024; nonce += 1) {
+    const marker = `${SANITIZED_URL_MARKER_BOUNDARY}gt-${namespace}-redaction-${String(nonce)}${SANITIZED_URL_MARKER_BOUNDARY}`;
+    if (
+      !containsOpaqueMarker(value, marker) &&
+      !containsOpaqueMarker(options.redactValue, marker)
+    ) {
+      return marker;
+    }
+  }
+  return undefined;
+}
+
+function createSanitizedUrlMarkerPrefix(
+  value: string,
+  redactValue: string,
+): string | undefined {
+  for (let nonce = 0; nonce < 1_024; nonce += 1) {
+    const prefix = `${SANITIZED_URL_MARKER_BOUNDARY}gt-sanitized-url-${String(nonce)}-`;
+    if (!value.includes(prefix) && !redactValue.includes(prefix)) {
+      return prefix;
+    }
+  }
+  return undefined;
+}
 
 function splitRawUrlWrapper(
   candidate: string,
@@ -522,7 +723,10 @@ function splitRawUrlWrapper(
 }
 
 function hasEmbeddedUrl(value: string): boolean {
-  return ABSOLUTE_TEXT_URL_PATTERN.test(value);
+  return (
+    ABSOLUTE_TEXT_URL_PATTERN.test(value) ||
+    OVERLONG_AUTHORITY_SCHEME_PATTERN.test(value)
+  );
 }
 
 function hasAmbiguousWhitespaceUrl(value: string): boolean {
@@ -607,7 +811,7 @@ function redactEncodedText(
     }
   }
   if (exhausted) return options.redactValue;
-  if (!PERCENT_ENCODED_TEXT_PATTERN.test(inspected)) return value;
+  if (!inspected.includes('%')) return value;
   let decoded: string;
   try {
     decoded = decodeURIComponent(inspected);
@@ -674,22 +878,41 @@ function sanitizeUrlResolved(
   if (value.length > inspectionLimit(resolved)) {
     return truncateText('[truncated]', resolved.maxStringLength);
   }
-  const urlRedactionOptions: ResolvedSanitizeOptions = {
+  const redactionMarker = createOpaqueRedactionMarker(value, resolved, 'url');
+  if (redactionMarker === undefined) {
+    return truncateText(resolved.redactValue, resolved.maxStringLength);
+  }
+  const markerOptions: ResolvedSanitizeOptions = {
     ...resolved,
-    redactValue: encodeURIComponent(resolved.redactValue),
+    redactValue: redactionMarker,
+  };
+  const encodedMarker = encodeURIComponent(redactionMarker);
+  const serializedMarkerOptions: ResolvedSanitizeOptions = {
+    ...markerOptions,
+    redactValue: encodedMarker,
     redactValues: resolved.redactValues.flatMap((secret) => [
       secret,
       encodeURIComponent(secret),
     ]),
   };
   const sanitized = canonicalizePercentEscapes(
-    sanitizeUrlWithOptions(value, resolved),
+    sanitizeUrlWithOptions(value, markerOptions),
   );
   const inspected = redactPersonalData(
-    redactKnownSecrets(sanitized, urlRedactionOptions),
-    urlRedactionOptions,
+    redactKnownSecrets(sanitized, serializedMarkerOptions),
+    serializedMarkerOptions,
   );
-  return truncateText(inspected, resolved.maxStringLength);
+  const hashIndex = inspected.indexOf('#');
+  const beforeHash =
+    hashIndex === -1 ? inspected : inspected.slice(0, hashIndex);
+  const hash = hashIndex === -1 ? '' : inspected.slice(hashIndex);
+  const restored = (
+    beforeHash.replaceAll(
+      encodedMarker,
+      encodeURIComponent(resolved.redactValue),
+    ) + hash.replaceAll(encodedMarker, resolved.redactValue)
+  ).replaceAll(redactionMarker, resolved.redactValue);
+  return truncateText(restored, resolved.maxStringLength);
 }
 
 function sanitizeUrlWithOptions(
@@ -793,32 +1016,74 @@ export function sanitizeText(
   if (value.length > inspectionLimit(resolved)) {
     return truncateText('[truncated]', resolved.maxStringLength);
   }
-  const knownSecretsRedacted = redactKnownSecrets(value, resolved);
-  if (hasAmbiguousWhitespaceUrl(knownSecretsRedacted)) {
+  if (OVERLONG_AUTHORITY_SCHEME_PATTERN.test(value)) {
     return truncateText(resolved.redactValue, resolved.maxStringLength);
   }
-  let markerNonce = 0;
-  const markerStem = (nonce: number) =>
-    `${SANITIZED_URL_MARKER_BOUNDARY}gt-sanitized-url-${String(nonce)}-`;
-  while (
-    knownSecretsRedacted.includes(markerStem(markerNonce)) ||
-    resolved.redactValue.includes(markerStem(markerNonce))
-  ) {
-    markerNonce += 1;
+  if (hasAmbiguousWhitespaceUrl(value)) {
+    return truncateText(resolved.redactValue, resolved.maxStringLength);
   }
-  const markerPrefix = markerStem(markerNonce);
+  const emailRanges = emailAddressRanges(value);
+  if (emailRanges === null) {
+    return truncateText(resolved.redactValue, resolved.maxStringLength);
+  }
+  const markerPrefix = createSanitizedUrlMarkerPrefix(
+    value,
+    resolved.redactValue,
+  );
+  if (markerPrefix === undefined) {
+    return truncateText(resolved.redactValue, resolved.maxStringLength);
+  }
+  const redactionMarker = createOpaqueRedactionMarker(value, resolved, 'text');
+  if (redactionMarker === undefined) {
+    return truncateText(resolved.redactValue, resolved.maxStringLength);
+  }
+  const markerOptions: ResolvedSanitizeOptions = {
+    ...resolved,
+    redactValue: redactionMarker,
+  };
   const sanitizedUrls: { readonly marker: string; readonly value: string }[] =
     [];
+  let emailRangeCursor = 0;
   const protectUrl = (candidate: string, offset: number, original: string) => {
+    for (;;) {
+      const currentRange = emailRanges[emailRangeCursor];
+      if (currentRange === undefined || currentRange.end > offset) break;
+      emailRangeCursor += 1;
+    }
+    const emailRange = emailRanges[emailRangeCursor];
+    if (
+      emailRange !== undefined &&
+      offset >= emailRange.start &&
+      offset < emailRange.end
+    ) {
+      return candidate;
+    }
     const [url, suffix] = splitRawUrlWrapper(candidate, original[offset - 1]);
     const marker = `${markerPrefix}${String(sanitizedUrls.length)}${SANITIZED_URL_MARKER_BOUNDARY}`;
     sanitizedUrls.push({ marker, value: sanitizeUrlResolved(url, resolved) });
     return `${marker}${suffix}`;
   };
-  const protectedText = knownSecretsRedacted.replace(
-    RAW_URLS_PATTERN,
-    protectUrl,
-  );
+  const protectedText = value.replace(RAW_URLS_PATTERN, protectUrl);
+  const transformOutsideRedactions = (
+    candidate: string,
+    transform: (part: string) => string,
+  ) =>
+    candidate
+      .split(redactionMarker)
+      .map((part, index) =>
+        index === 0 ? transform(part) : redactionMarker + transform(part),
+      )
+      .join('');
+  const inspectTextSegment = (candidate: string) => {
+    const personalDataRedacted = redactPersonalData(candidate, markerOptions);
+    const knownSecretsRedacted = transformOutsideRedactions(
+      personalDataRedacted,
+      (part) => redactKnownSecrets(part, markerOptions),
+    );
+    return transformOutsideRedactions(knownSecretsRedacted, (part) =>
+      redactEncodedText(part, markerOptions),
+    );
+  };
   const inspectedParts: string[] = [];
   let inspectedOffset = 0;
   for (const sanitizedUrl of sanitizedUrls) {
@@ -827,21 +1092,17 @@ export function sanitizeText(
       inspectedOffset,
     );
     inspectedParts.push(
-      redactEncodedText(
-        protectedText.slice(inspectedOffset, markerOffset),
-        resolved,
-      ),
+      inspectTextSegment(protectedText.slice(inspectedOffset, markerOffset)),
       sanitizedUrl.marker,
     );
     inspectedOffset = markerOffset + sanitizedUrl.marker.length;
   }
-  inspectedParts.push(
-    redactEncodedText(protectedText.slice(inspectedOffset), resolved),
-  );
-  let redacted = redactPersonalData(inspectedParts.join(''), resolved);
+  inspectedParts.push(inspectTextSegment(protectedText.slice(inspectedOffset)));
+  let redacted = inspectedParts.join('');
   for (const sanitizedUrl of sanitizedUrls) {
     redacted = redacted.replaceAll(sanitizedUrl.marker, sanitizedUrl.value);
   }
+  redacted = redacted.replaceAll(redactionMarker, resolved.redactValue);
   return truncateText(redacted, resolved.maxStringLength);
 }
 

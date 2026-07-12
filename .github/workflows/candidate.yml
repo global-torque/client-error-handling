@@ -42,17 +42,16 @@ jobs:
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           test "$(git rev-parse origin/main)" = "${GITHUB_SHA}"
           test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
-          pnpm install --frozen-lockfile
+          pnpm --config.ignore-pnpmfile=true install --frozen-lockfile --ignore-scripts
       - name: Run package gates
-        run: pnpm run ci
-      - name: Build and pack final candidate once
+        run: pnpm --config.enable-pre-post-scripts=false run ci
+      - name: Pack the validated candidate once
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf dist release
-          pnpm run build
+          rm -rf release
           mkdir release
-          pnpm pack --pack-destination release
+          pnpm --config.ignore-scripts=true --config.ignore-pnpmfile=true pack --pack-destination release
           node scripts/create-release-manifest.mjs release
       - name: Select SHA-512 subject checksum
         id: subject

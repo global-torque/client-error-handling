@@ -6,6 +6,11 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { verifyPublicContent } from './verify-public-content.mjs';
+import {
+  verifyCanonicalPackageArchive,
+  verifyPackedFileSet,
+  verifyPortableSourceMap,
+} from './release-artifact-policy.mjs';
 
 const releaseDirectory = path.resolve(process.argv[2] ?? 'release');
 const artifacts = fs
@@ -51,6 +56,15 @@ const flattenTargets = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
   return Object.values(value).flatMap(flattenTargets);
 };
+const canonicalJson = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, canonicalJson(value[key])]),
+  );
+};
 
 const sourceCommit = run('git', ['rev-parse', 'HEAD']);
 const sourceStatus = run('git', ['status', '--porcelain=v1']);
@@ -59,6 +73,7 @@ if (sourceStatus) {
     'Release artifact must be created from a clean source commit',
   );
 }
+const archivedFiles = verifyCanonicalPackageArchive(artifactPath);
 
 const temporaryDirectory = fs.mkdtempSync(
   path.join(os.tmpdir(), 'global-torque-release-'),
@@ -84,6 +99,41 @@ try {
   const files = walk(packageRoot)
     .map((filePath) => relative(packageRoot, filePath))
     .sort();
+  if (JSON.stringify(archivedFiles) !== JSON.stringify(files)) {
+    throw new Error('Tar member list differs from the extracted package files');
+  }
+  verifyPackedFileSet(packageManifest, files, packageRoot);
+  const expectedArtifact = `${packageManifest.name.replace(/^@/, '').replace('/', '-')}-${packageManifest.version}.tgz`;
+  if (artifact !== expectedArtifact) {
+    throw new Error(
+      `Artifact filename does not match package identity: ${artifact}`,
+    );
+  }
+  const sourceManifest = JSON.parse(
+    fs.readFileSync(path.resolve('package.json'), 'utf8'),
+  );
+  delete sourceManifest.packageManager;
+  if (
+    JSON.stringify(canonicalJson(sourceManifest)) !==
+    JSON.stringify(canonicalJson(packageManifest))
+  ) {
+    throw new Error(
+      'Packed package.json differs from the validated source manifest',
+    );
+  }
+  for (const filePath of files.filter(
+    (filePath) => filePath !== 'package.json',
+  )) {
+    const sourcePath = path.resolve(filePath);
+    if (
+      !fs.statSync(sourcePath, { throwIfNoEntry: false })?.isFile() ||
+      fileDigest(sourcePath) !== fileDigest(path.join(packageRoot, filePath))
+    ) {
+      throw new Error(
+        `Packed file differs from the clean checkout: ${filePath}`,
+      );
+    }
+  }
   const unexpected = files.filter((filePath) => !isAllowed(filePath));
   if (unexpected.length > 0) {
     throw new Error(
@@ -116,23 +166,17 @@ try {
     }
   }
 
-  for (const mapPath of walk(path.join(packageRoot, 'dist')).filter(
-    (filePath) => filePath.endsWith('.map'),
+  for (const relativeMapPath of files.filter((filePath) =>
+    filePath.endsWith('.map'),
   )) {
-    const sourceMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
-    if (
-      !Array.isArray(sourceMap.sources) ||
-      !Array.isArray(sourceMap.sourcesContent) ||
-      sourceMap.sources.length === 0 ||
-      sourceMap.sources.length !== sourceMap.sourcesContent.length ||
-      sourceMap.sources.some(
-        (source) => path.isAbsolute(source) || /^file:/i.test(source),
-      )
-    ) {
+    if (!relativeMapPath.startsWith('dist/')) {
       throw new Error(
-        `Invalid or non-portable source map: ${relative(packageRoot, mapPath)}`,
+        `Source maps are only allowed under dist/: ${relativeMapPath}`,
       );
     }
+    const mapPath = path.join(packageRoot, relativeMapPath);
+    const sourceMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+    verifyPortableSourceMap(mapPath, packageRoot, sourceMap, process.cwd());
   }
 
   const artifactDigest = digest(fs.readFileSync(artifactPath));
