@@ -247,18 +247,6 @@ const TEXT_RULES = [
   ],
 ];
 
-const SEMVER_NUMERIC_IDENTIFIER_SOURCE = '(?:0|[1-9]\\d*)';
-const SEMVER_PRERELEASE_IDENTIFIER_SOURCE = `(?:${SEMVER_NUMERIC_IDENTIFIER_SOURCE}|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)`;
-const SEMVER_VERSION_SOURCE =
-  `${SEMVER_NUMERIC_IDENTIFIER_SOURCE}\\.${SEMVER_NUMERIC_IDENTIFIER_SOURCE}\\.${SEMVER_NUMERIC_IDENTIFIER_SOURCE}` +
-  `(?:-${SEMVER_PRERELEASE_IDENTIFIER_SOURCE}(?:\\.${SEMVER_PRERELEASE_IDENTIFIER_SOURCE})*)?` +
-  '(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?';
-const SEMVER_COMPARATOR_SOURCE = `(?:\\^|~|>=|<=|>|<|=)?${SEMVER_VERSION_SOURCE}`;
-const SEMVER_CLAUSE_SOURCE = `${SEMVER_COMPARATOR_SOURCE}(?:[ \\t]+${SEMVER_COMPARATOR_SOURCE})*`;
-const SEMVER_RANGE_PATTERN = new RegExp(
-  `^${SEMVER_CLAUSE_SOURCE}(?:[ \\t]*\\|\\|[ \\t]*${SEMVER_CLAUSE_SOURCE})*$`,
-);
-const SEMVER_VERSION_PATTERN = new RegExp(`^${SEMVER_VERSION_SOURCE}$`);
 const GLOBAL_TORQUE_RELEASE_ASSET_PATTERN =
   /^https:\/\/github\.com\/global-torque\/([a-z0-9-]+)\/releases\/download\/v([^/\s#]+)\/global-torque-([a-z0-9-]+)-([^/\s#]+)\.tgz$/i;
 const EXACT_GITHUB_COMMIT_PATTERNS = [
@@ -267,6 +255,86 @@ const EXACT_GITHUB_COMMIT_PATTERNS = [
   /^(?:git(?:\+https|\+ssh)?|https?|ssh):\/\/(?:git@)?github\.com\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]+(?:\.git)?#[0-9a-f]{40}$/i,
   /^git@github\.com:[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]+(?:\.git)?#[0-9a-f]{40}$/i,
 ];
+
+const isSemverIdentifierCharacter = (character) => {
+  const codePoint = character.codePointAt(0);
+  return (
+    character === '-' ||
+    (codePoint >= 0x30 && codePoint <= 0x39) ||
+    (codePoint >= 0x41 && codePoint <= 0x5a) ||
+    (codePoint >= 0x61 && codePoint <= 0x7a)
+  );
+};
+
+const isSemverNumericIdentifier = (value) =>
+  value.length > 0 &&
+  (value === '0' || value[0] !== '0') &&
+  [...value].every((character) => character >= '0' && character <= '9');
+
+const isSemverIdentifier = (value, enforceNumericLeadingZero) => {
+  if (value.length === 0 || ![...value].every(isSemverIdentifierCharacter)) {
+    return false;
+  }
+  const numeric = [...value].every(
+    (character) => character >= '0' && character <= '9',
+  );
+  return (
+    !enforceNumericLeadingZero || !numeric || isSemverNumericIdentifier(value)
+  );
+};
+
+const isFullSemver = (value) => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+    return false;
+  }
+  const buildParts = value.split('+');
+  if (
+    buildParts.length > 2 ||
+    (buildParts[1] !== undefined &&
+      !buildParts[1]
+        .split('.')
+        .every((part) => isSemverIdentifier(part, false)))
+  ) {
+    return false;
+  }
+  const core = buildParts[0];
+  const prereleaseSeparator = core.indexOf('-');
+  const main =
+    prereleaseSeparator === -1 ? core : core.slice(0, prereleaseSeparator);
+  const prerelease =
+    prereleaseSeparator === -1
+      ? undefined
+      : core.slice(prereleaseSeparator + 1);
+  const mainParts = main.split('.');
+  if (mainParts.length !== 3 || !mainParts.every(isSemverNumericIdentifier)) {
+    return false;
+  }
+  return (
+    prerelease === undefined ||
+    prerelease.split('.').every((part) => isSemverIdentifier(part, true))
+  );
+};
+
+const isSemverRange = (value) => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) {
+    return false;
+  }
+  const clauses = value.split('||');
+  if (clauses.length > 16) return false;
+  return clauses.every((rawClause) => {
+    const clause = rawClause.trim();
+    if (clause.length === 0) return false;
+    const comparators = clause.split(/[ \t]+/u);
+    if (comparators.length > 16) return false;
+    return comparators.every((comparator) => {
+      const prefix = ['>=', '<=', '^', '~', '>', '<', '='].find((candidate) =>
+        comparator.startsWith(candidate),
+      );
+      const version = prefix ? comparator.slice(prefix.length) : comparator;
+      return isFullSemver(version);
+    });
+  });
+};
 
 function isExactGlobalTorqueReleaseAsset(name, value) {
   const match = GLOBAL_TORQUE_RELEASE_ASSET_PATTERN.exec(value);
@@ -279,17 +347,20 @@ function isExactGlobalTorqueReleaseAsset(name, value) {
     match[1]?.toLowerCase() === expectedRepository &&
     match[1]?.toLowerCase() === match[3]?.toLowerCase() &&
     match[2] === match[4] &&
-    SEMVER_VERSION_PATTERN.test(match[2] ?? '')
+    isFullSemver(match[2] ?? '')
   );
 }
 
 function dependencySourcePolicyError(name, specifier) {
-  const value = String(specifier).trim();
+  const value = String(specifier);
+  if (value !== value.trim()) {
+    return 'must not contain leading or trailing whitespace';
+  }
   if (isExactGlobalTorqueReleaseAsset(name, value)) return undefined;
   if (EXACT_GITHUB_COMMIT_PATTERNS.some((pattern) => pattern.test(value))) {
     return undefined;
   }
-  if (SEMVER_RANGE_PATTERN.test(value)) return undefined;
+  if (isSemverRange(value)) return undefined;
   return 'must use a full semver version/range, an exact 40-hex GitHub commit, or a version-consistent Global Torque release asset';
 }
 
@@ -476,7 +547,7 @@ function validateManifest(root, options) {
   }
   if (
     manifest.version !== EXPECTED_PACKAGE_VERSIONS.get(EXPECTED_PACKAGE_NAME) ||
-    !SEMVER_VERSION_PATTERN.test(String(manifest.version))
+    !isFullSemver(String(manifest.version))
   ) {
     errors.push(
       'package.json version must match the reviewed candidate version',
@@ -610,7 +681,7 @@ function validateManifest(root, options) {
         !(
           /^https:\/\/github\.com\/global-torque\/[^/]+\/releases\/download\/v[^/]+\/global-torque-[^/]+\.tgz$/.test(
             String(specifier),
-          ) || /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(String(specifier))
+          ) || isFullSemver(String(specifier))
         )
       ) {
         errors.push(
