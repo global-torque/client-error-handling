@@ -7,6 +7,9 @@
   manifests, and provenance workflow.
 - Replaced the email detector with a linear scanner and adversarial long-input
   coverage after CodeQL rejected the previous backtracking expression.
+- Redacts EAI/IDN addresses, the full ASCII `atext` set, quoted and obsolete
+  mixed local parts, CFWS/nested comments, domain literals, IDNA dot forms,
+  and single-label domains without leaking identifying prefixes or suffixes.
 - Supersedes the dirty-tree beta.2 implementation artifact; beta.2 remains
   historical local evidence and must not be uploaded or retagged.
 
