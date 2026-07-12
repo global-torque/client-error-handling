@@ -193,11 +193,16 @@ function redactKnownSecrets(
     );
 }
 
+const UNICODE_EMAIL_LOCAL_CHARACTER = /^[\p{L}\p{N}\p{M}\p{S}]$/u;
+const UNICODE_EMAIL_DOMAIN_CHARACTER = /^[\p{L}\p{N}\p{M}]$/u;
+const UNICODE_EMAIL_TLD_CHARACTER = /^[\p{L}\p{M}]$/u;
+
 function isAsciiLetter(code: number): boolean {
   return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 }
 
-function isEmailLocalCharacter(code: number): boolean {
+function isEmailLocalCharacter(character: string): boolean {
+  const code = Number(character.codePointAt(0));
   return (
     isAsciiLetter(code) ||
     (code >= 48 && code <= 57) ||
@@ -205,17 +210,46 @@ function isEmailLocalCharacter(code: number): boolean {
     code === 43 ||
     code === 45 ||
     code === 46 ||
-    code === 95
+    code === 95 ||
+    (code > 127 && UNICODE_EMAIL_LOCAL_CHARACTER.test(character))
   );
 }
 
-function isEmailDomainCharacter(code: number): boolean {
+function isEmailDomainCharacter(character: string): boolean {
+  const code = Number(character.codePointAt(0));
   return (
     isAsciiLetter(code) ||
     (code >= 48 && code <= 57) ||
     code === 45 ||
-    code === 46
+    code === 46 ||
+    (code > 127 && UNICODE_EMAIL_DOMAIN_CHARACTER.test(character))
   );
+}
+
+function isEmailTldCharacter(character: string): boolean {
+  const code = Number(character.codePointAt(0));
+  return (
+    isAsciiLetter(code) ||
+    (code > 127 && UNICODE_EMAIL_TLD_CHARACTER.test(character))
+  );
+}
+
+function previousCodePointStart(value: string, index: number): number {
+  let start = index - 1;
+  if (
+    start > 0 &&
+    value.charCodeAt(start) >= 0xdc00 &&
+    value.charCodeAt(start) <= 0xdfff &&
+    value.charCodeAt(start - 1) >= 0xd800 &&
+    value.charCodeAt(start - 1) <= 0xdbff
+  ) {
+    start -= 1;
+  }
+  return start;
+}
+
+function codePointCharacterAt(value: string, index: number): string {
+  return String.fromCodePoint(Number(value.codePointAt(index)));
 }
 
 function redactEmailAddresses(value: string, replacement: string): string {
@@ -228,11 +262,12 @@ function redactEmailAddresses(value: string, replacement: string): string {
     if (at === -1) break;
 
     let start = at;
-    while (
-      start > copiedThrough &&
-      isEmailLocalCharacter(value.charCodeAt(start - 1))
-    ) {
-      start -= 1;
+    while (start > copiedThrough) {
+      const candidateStart = previousCodePointStart(value, start);
+      if (!isEmailLocalCharacter(value.slice(candidateStart, start))) {
+        break;
+      }
+      start = candidateStart;
     }
     if (start === at) {
       searchFrom = at + 1;
@@ -244,24 +279,23 @@ function redactEmailAddresses(value: string, replacement: string): string {
     let tldLetters = 0;
     let tldContainsOnlyLetters = true;
     let validEnd = -1;
-    while (
-      cursor < value.length &&
-      isEmailDomainCharacter(value.charCodeAt(cursor))
-    ) {
-      const code = value.charCodeAt(cursor);
-      if (code === 46) {
+    while (cursor < value.length) {
+      const character = codePointCharacterAt(value, cursor);
+      if (!isEmailDomainCharacter(character)) break;
+      const nextCursor = cursor + character.length;
+      if (character === '.') {
         lastDot = cursor;
         tldLetters = 0;
         tldContainsOnlyLetters = true;
       } else if (lastDot >= at + 2) {
-        if (tldContainsOnlyLetters && isAsciiLetter(code)) {
+        if (tldContainsOnlyLetters && isEmailTldCharacter(character)) {
           tldLetters += 1;
-          if (tldLetters >= 2) validEnd = cursor + 1;
+          if (tldLetters >= 2) validEnd = nextCursor;
         } else {
           tldContainsOnlyLetters = false;
         }
       }
-      cursor += 1;
+      cursor = nextCursor;
     }
 
     if (validEnd === -1) {

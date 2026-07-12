@@ -107,9 +107,21 @@ describe('transport sanitization', () => {
       'user@example.com1',
       'user@example.com-secret',
       'user@example.xn--p1ai',
+      'élise@example.com',
+      '用户@example.com',
+      'user@exämple.com',
+      'user@example.рф',
+      'δοκιμή@παράδειγμα.δοκιμή',
+      'user@例え.テスト',
+      'emoji😀@example.com',
+      'e\u0301@example.com',
     ]) {
       expect(sanitizeText(email)).toBe('[redacted]');
     }
+    expect(sanitizeText('contact élise@example.com now')).toBe(
+      'contact [redacted] now',
+    );
+    expect(sanitizeText('用户@example.com-secret')).toBe('[redacted]');
     expect(sanitizeText('user@example.test.')).toBe('[redacted].');
     expect(
       sanitizeText(`${'%'.repeat(20_000)}@example.test`, {
