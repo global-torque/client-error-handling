@@ -23,10 +23,9 @@ consumer checks, and release gates pass.
 
 ## What It Does Not Own
 
-- Analytics-api, Loki, Grafana, or backend sink adapters.
-- Vue, VitePress, Pinia, Vue Router, app bootstrap, session/profile route
-  context, Ory/Kratos, Tahoe/fund-manager, investment workflow, or UI presenter
-  behavior.
+- Host-specific analytics, logging, monitoring, or backend sink adapters.
+- Framework bootstrap, identity, administration, regulated-workflow, session,
+  routing, or UI-presentation behavior.
 - Direct env reads, private URLs, raw request bodies, mutation payloads, secrets,
   or customer data.
 
@@ -63,5 +62,5 @@ adapters through the `ClientErrorReporter` contract.
 
 ## Release Status
 
-Prepare-next. Do not publish to npm until the OpenSpec release gates for the
-error package track are complete.
+Prepare-next. Do not publish to npm until the public release gates for the error
+package track are complete.
