@@ -25,10 +25,89 @@ const EXPECTED_INSTALL_DEPENDENCIES = new Map([
     ],
   ],
 ]);
-const FULL_SEMVER =
-  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const RELEASE_ASSET =
   /^https:\/\/github\.com\/global-torque\/([a-z0-9-]+)\/releases\/download\/v([^/\s]+)\/global-torque-([a-z0-9-]+)-([^/\s]+)\.tgz$/i;
+
+const isIdentifierCharacter = (character) => {
+  const codePoint = character.codePointAt(0);
+  return (
+    character === '-' ||
+    (codePoint >= 0x30 && codePoint <= 0x39) ||
+    (codePoint >= 0x41 && codePoint <= 0x5a) ||
+    (codePoint >= 0x61 && codePoint <= 0x7a)
+  );
+};
+
+const isNumericIdentifier = (value) =>
+  value.length > 0 &&
+  (value === '0' || value[0] !== '0') &&
+  [...value].every((character) => character >= '0' && character <= '9');
+
+const isSemverIdentifier = (value, enforceNumericLeadingZero) => {
+  if (value.length === 0 || ![...value].every(isIdentifierCharacter)) {
+    return false;
+  }
+  const numeric = [...value].every(
+    (character) => character >= '0' && character <= '9',
+  );
+  return !enforceNumericLeadingZero || !numeric || isNumericIdentifier(value);
+};
+
+const isFullSemver = (value) => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
+    return false;
+  }
+  const buildParts = value.split('+');
+  if (
+    buildParts.length > 2 ||
+    (buildParts[1] !== undefined &&
+      !buildParts[1]
+        .split('.')
+        .every((part) => isSemverIdentifier(part, false)))
+  ) {
+    return false;
+  }
+  const core = buildParts[0];
+  const prereleaseSeparator = core.indexOf('-');
+  const main =
+    prereleaseSeparator === -1 ? core : core.slice(0, prereleaseSeparator);
+  const prerelease =
+    prereleaseSeparator === -1
+      ? undefined
+      : core.slice(prereleaseSeparator + 1);
+  const mainParts = main.split('.');
+  if (mainParts.length !== 3 || !mainParts.every(isNumericIdentifier)) {
+    return false;
+  }
+  return (
+    prerelease === undefined ||
+    prerelease.split('.').every((part) => isSemverIdentifier(part, true))
+  );
+};
+
+for (const validVersion of [
+  '0.0.0',
+  '1.2.3',
+  '1.2.3-beta.7',
+  '1.2.3+build.1',
+]) {
+  if (!isFullSemver(validVersion)) {
+    throw new Error(`Semver self-test rejected ${validVersion}`);
+  }
+}
+for (const invalidVersion of [
+  '1',
+  '1.2',
+  '01.2.3',
+  '1.2.3-01',
+  '1.2.3-',
+  '1.2.3+',
+  '1.2.3+build+extra',
+]) {
+  if (isFullSemver(invalidVersion)) {
+    throw new Error(`Semver self-test accepted ${invalidVersion}`);
+  }
+}
 
 const parseInstallSpecifier = (dependencySpec) => {
   const match = /^(@[^/\s]+\/[^@\s]+|[^@/\s]+)@([^\s]+)$/.exec(dependencySpec);
@@ -38,7 +117,7 @@ const parseInstallSpecifier = (dependencySpec) => {
 };
 
 const isSafeInstallSource = (name, source) => {
-  if (FULL_SEMVER.test(source)) return true;
+  if (isFullSemver(source)) return true;
   const asset = RELEASE_ASSET.exec(source);
   if (!asset || !name.startsWith('@global-torque/')) return false;
   const slug = name.slice('@global-torque/'.length).toLowerCase();
@@ -46,7 +125,7 @@ const isSafeInstallSource = (name, source) => {
     asset[1]?.toLowerCase() === slug &&
     asset[3]?.toLowerCase() === slug &&
     asset[2] === asset[4] &&
-    FULL_SEMVER.test(asset[2] ?? '')
+    isFullSemver(asset[2] ?? '')
   );
 };
 
