@@ -115,6 +115,23 @@ describe('transport sanitization', () => {
       'user@例え.テスト',
       'emoji😀@example.com',
       'e\u0301@example.com',
+      'o’connor@example.com',
+      '用户。测试@example.com',
+      'user@example。com',
+      'user@example．com',
+      'user@example｡com',
+      'user@l·l.cat',
+      'user@a͵b.example',
+      'user@א׳ב.example',
+      'user@カ・タ.example',
+      'δοκιμή·τεστ@παράδειγμα.δοκιμή',
+      'first!last@example.com',
+      "o'reilly@example.com",
+      'user&tag@example.com',
+      '""@example.com',
+      '"john.doe"@example.com',
+      '"john\\"doe"@example.com',
+      'user@[192.0.2.1]',
     ]) {
       expect(sanitizeText(email)).toBe('[redacted]');
     }
@@ -123,6 +140,15 @@ describe('transport sanitization', () => {
     );
     expect(sanitizeText('用户@example.com-secret')).toBe('[redacted]');
     expect(sanitizeText('user@example.test.')).toBe('[redacted].');
+    expect(sanitizeText('user@example.com。')).toBe('[redacted]。');
+    expect(sanitizeText('john"@example.com')).toBe('john"@example.com');
+    expect(sanitizeText('"john\ndoe"@example.com')).toBe(
+      '"john\ndoe"@example.com',
+    );
+    expect(sanitizeText('"john\rdoe"@example.com')).toBe(
+      '"john\rdoe"@example.com',
+    );
+    expect(sanitizeText('user@[192.0.2. 1]')).toBe('user@[192.0.2. 1]');
     expect(
       sanitizeText(`${'%'.repeat(20_000)}@example.test`, {
         maxStringLength: 21_000,
