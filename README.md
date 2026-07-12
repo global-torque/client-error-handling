@@ -1,10 +1,16 @@
 # @global-torque/client-error-handling
 
+> [!CAUTION]
+> This default-branch source is a quarantined pre-0.2 bridge, not an approved
+> release candidate. Do not install it from GitHub, a branch, or npm. Use only
+> a future immutable prerelease asset after its checksum, consumer evidence,
+> and public release review are complete.
+
 Prepare-next framework-free client error handling core.
 
 This package is reserved for the public `@global-torque/client-error-handling`
 surface. It is not a publication approval by itself: public release remains
-blocked until private Webdevelop adapters, staging telemetry evidence, clean
+blocked until host adapters, staging telemetry evidence, clean
 consumer checks, and release gates pass.
 
 ## What It Owns

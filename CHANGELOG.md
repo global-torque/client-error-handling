@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Quarantined the unsupported pre-0.2 default-branch bridge and disabled
+  publication pending privacy, consumer, and reviewed release evidence.
+
 ## 0.0.0
 
 - Added prepare-next public core scaffolding for framework-free client error

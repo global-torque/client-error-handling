@@ -1,12 +1,11 @@
 {
   "name": "@global-torque/client-error-handling",
-  "private": false,
+  "private": true,
   "version": "0.0.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "prepack": "npm run build",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -14,9 +13,6 @@
     "@types/node": "^25.5.0",
     "typescript": "^6.0.2",
     "vitest": "4.1.7"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "repository": {
     "type": "git",
