@@ -258,11 +258,10 @@ function codePointCharacterAt(value: string, index: number): string {
 
 function quotedEmailLocalStart(
   value: string,
-  at: number,
+  end: number,
   minimum: number,
 ): number {
-  if (at < 2 || value.charCodeAt(at - 1) !== 34) return -1;
-  let cursor = at - 2;
+  let cursor = end - 2;
   while (cursor >= minimum) {
     const code = value.charCodeAt(cursor);
     if (code === 10 || code === 13) return -1;
@@ -280,6 +279,37 @@ function quotedEmailLocalStart(
   return -1;
 }
 
+function emailLocalWordStart(
+  value: string,
+  end: number,
+  minimum: number,
+): number {
+  if (end <= minimum) return -1;
+  if (value.charCodeAt(end - 1) === 34) {
+    return quotedEmailLocalStart(value, end, minimum);
+  }
+  let cursor = end;
+  while (cursor > minimum) {
+    const candidateStart = previousCodePointStart(value, cursor);
+    const character = value.slice(candidateStart, cursor);
+    if (isEmailDot(character) || !isEmailLocalCharacter(character)) break;
+    cursor = candidateStart;
+  }
+  return cursor < end ? cursor : -1;
+}
+
+function emailLocalStart(value: string, at: number, minimum: number): number {
+  let start = emailLocalWordStart(value, at, minimum);
+  if (start === -1) return -1;
+  while (start > minimum) {
+    const dotStart = previousCodePointStart(value, start);
+    if (!isEmailDot(value.slice(dotStart, start))) break;
+    const previousWord = emailLocalWordStart(value, dotStart, minimum);
+    start = previousWord === -1 ? dotStart : previousWord;
+  }
+  return start;
+}
+
 function redactEmailAddresses(value: string, replacement: string): string {
   let copiedThrough = 0;
   let searchFrom = 0;
@@ -289,18 +319,8 @@ function redactEmailAddresses(value: string, replacement: string): string {
     const at = value.indexOf('@', searchFrom);
     if (at === -1) break;
 
-    let start = quotedEmailLocalStart(value, at, copiedThrough);
+    const start = emailLocalStart(value, at, copiedThrough);
     if (start === -1) {
-      start = at;
-      while (start > copiedThrough) {
-        const candidateStart = previousCodePointStart(value, start);
-        if (!isEmailLocalCharacter(value.slice(candidateStart, start))) {
-          break;
-        }
-        start = candidateStart;
-      }
-    }
-    if (start === at) {
       searchFrom = at + 1;
       continue;
     }

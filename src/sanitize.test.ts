@@ -131,6 +131,10 @@ describe('transport sanitization', () => {
       '""@example.com',
       '"john.doe"@example.com',
       '"john\\"doe"@example.com',
+      'much."more\\ unusual"@example.com',
+      'first."last"@example.com',
+      'very.unusual."@".unusual.com@example.com',
+      'first..last@example.com',
       'user@[192.0.2.1]',
     ]) {
       expect(sanitizeText(email)).toBe('[redacted]');
