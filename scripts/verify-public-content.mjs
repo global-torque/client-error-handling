@@ -154,6 +154,22 @@ const EXPECTED_EXPORT_SUBPATHS = new Map([
     ],
   ],
 ]);
+const EXPECTED_PACKAGE_VERSIONS = new Map([
+  ['@global-torque/admin-toolkit', '0.2.0-beta.2'],
+  ['@global-torque/client-error-handling', '0.1.0-beta.3'],
+  ['@global-torque/content-toolkit', '0.2.0-beta.7'],
+  ['@global-torque/design-tokens', '0.1.0-beta.2'],
+  ['@global-torque/markdown-it-wikilinks', '0.2.0-beta.3'],
+  ['@global-torque/vitepress-toolkit', '0.2.0-beta.6'],
+]);
+const EXPECTED_SIDE_EFFECTS = new Map([
+  ['@global-torque/admin-toolkit', ['./dist/styles.css']],
+  ['@global-torque/client-error-handling', false],
+  ['@global-torque/content-toolkit', false],
+  ['@global-torque/design-tokens', ['./dist/*.css']],
+  ['@global-torque/markdown-it-wikilinks', false],
+  ['@global-torque/vitepress-toolkit', false],
+]);
 const APPROVED_LICENSE_SHA256 = new Map([
   [
     '@global-torque/markdown-it-wikilinks',
@@ -405,6 +421,36 @@ for (const [dependencyName, immutableSource] of [
   }
 }
 
+function validatePublicPath(relativePath) {
+  for (const [label, rule] of TEXT_RULES) {
+    if (rule.test(relativePath)) {
+      throw new Error(`${relativePath} path contains ${label}`);
+    }
+  }
+  if (/\bWebdevelop(?:\.biz| Pro)?\b/i.test(relativePath)) {
+    throw new Error(`${relativePath} path contains a private product name`);
+  }
+  if (/(?:^|\/)(?:apps|openspec|tasks|\.codex|\.agents)\//.test(relativePath)) {
+    throw new Error(`${relativePath} contains a private path segment`);
+  }
+}
+
+for (const hostilePath of [
+  'dist/Webdevelop.js',
+  'dist/apps/private.js',
+  'dist/openspec/private.js',
+  'dist/tasks/private.js',
+  'dist/.codex/private.js',
+  'dist/.agents/private.js',
+]) {
+  try {
+    validatePublicPath(hostilePath);
+  } catch {
+    continue;
+  }
+  throw new Error(`Public-path self-test accepted ${hostilePath}`);
+}
+
 function walkFiles(directory, excludedDirectories) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     if (excludedDirectories.has(entry.name)) return [];
@@ -427,6 +473,14 @@ function validateManifest(root, options) {
   const expectedBugsUrl = `https://github.com/global-torque/${EXPECTED_PACKAGE_NAME.slice('@global-torque/'.length)}/issues`;
   if (manifest.name !== EXPECTED_PACKAGE_NAME) {
     errors.push(`package.json name must be ${EXPECTED_PACKAGE_NAME}`);
+  }
+  if (
+    manifest.version !== EXPECTED_PACKAGE_VERSIONS.get(EXPECTED_PACKAGE_NAME) ||
+    !SEMVER_VERSION_PATTERN.test(String(manifest.version))
+  ) {
+    errors.push(
+      'package.json version must match the reviewed candidate version',
+    );
   }
   if (
     manifest.repository?.type !== 'git' ||
@@ -460,8 +514,13 @@ function validateManifest(root, options) {
   if (!options.packed && manifest.packageManager !== 'pnpm@10.33.0') {
     errors.push('package.json must pin packageManager to pnpm@10.33.0');
   }
-  if (!Object.hasOwn(manifest, 'sideEffects')) {
-    errors.push('package.json must declare intentional sideEffects');
+  if (
+    JSON.stringify(manifest.sideEffects) !==
+    JSON.stringify(EXPECTED_SIDE_EFFECTS.get(manifest.name))
+  ) {
+    errors.push(
+      'package.json sideEffects must match the package policy exactly',
+    );
   }
   const expectedExportSubpaths = EXPECTED_EXPORT_SUBPATHS.get(manifest.name);
   const actualExportSubpaths =
@@ -625,11 +684,7 @@ export function verifyPublicContent(rootDirectory, options = {}) {
         `Packed package contains an unsupported file type: ${relativePath}`,
       );
     }
-    for (const [label, rule] of TEXT_RULES) {
-      if (rule.test(relativePath)) {
-        throw new Error(`${relativePath} path contains ${label}`);
-      }
-    }
+    validatePublicPath(relativePath);
     let source;
     try {
       source = decoder.decode(fs.readFileSync(filePath));
@@ -673,11 +728,11 @@ function runPackedPolicySelfTest() {
   const baseManifest = {
     name: EXPECTED_PACKAGE_NAME,
     private: false,
-    version: '0.2.0-beta.7',
+    version: EXPECTED_PACKAGE_VERSIONS.get(EXPECTED_PACKAGE_NAME),
     license: 'MIT',
     publishConfig: { access: 'public' },
     engines: { node: '>=22' },
-    sideEffects: false,
+    sideEffects: EXPECTED_SIDE_EFFECTS.get(EXPECTED_PACKAGE_NAME),
     repository: {
       type: 'git',
       url: `git+https://github.com/global-torque/${repositorySlug}.git`,
@@ -704,6 +759,14 @@ function runPackedPolicySelfTest() {
   };
 
   try {
+    expectManifestRejected('unreviewed version', {
+      ...baseManifest,
+      version: 'not-semver',
+    });
+    expectManifestRejected('incorrect sideEffects', {
+      ...baseManifest,
+      sideEffects: true,
+    });
     expectManifestRejected('non-MIT license', {
       ...baseManifest,
       license: 'UNLICENSED',
