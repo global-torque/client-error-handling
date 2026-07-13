@@ -6,6 +6,18 @@
 
 Framework-free, transport-safe client error normalization, sanitization,
 dedupe, reporters, and bounded reporting orchestration.
+> [!CAUTION]
+> This default-branch source is a quarantined pre-0.2 bridge, not an approved
+> release candidate. Do not install it from GitHub, a branch, or npm. Use only
+> a future immutable prerelease asset after its checksum, consumer evidence,
+> and public release review are complete.
+
+Prepare-next framework-free client error handling core.
+
+This package is reserved for the public `@global-torque/client-error-handling`
+surface. It is not a publication approval by itself: public release remains
+blocked until host adapters, staging telemetry evidence, clean
+consumer checks, and release gates pass.
 
 ## Installation and compatibility
 
@@ -49,6 +61,11 @@ The default allowlist:
   `BigInt`, and non-finite numbers without executing input accessors.
 - fails closed with an opaque truncation marker when bounded pre-inspection
   cannot safely examine a complete text or URL value.
+- Host-specific analytics, logging, monitoring, or backend sink adapters.
+- Framework bootstrap, identity, administration, regulated-workflow, session,
+  routing, or UI-presentation behavior.
+- Direct env reads, private URLs, raw request bodies, mutation payloads, secrets,
+  or customer data.
 
 No generic sanitizer can identify every application secret from value alone.
 Hosts must pass known canaries through `redactValues`, keep metadata/header
@@ -205,3 +222,5 @@ Run `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck`,
 reports use GitHub private vulnerability reporting. Feature requests and
 reproducible bugs belong in
 <https://github.com/global-torque/client-error-handling/issues>.
+Prepare-next. Do not publish to npm until the public release gates for the error
+package track are complete.

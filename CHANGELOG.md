@@ -56,6 +56,10 @@
   lint, clean-room, and immutable artifact tooling.
 - Made `invest-runtime` the first real consumer through a body-free
   transport-safe analytics adapter.
+## Unreleased
+
+- Quarantined the unsupported pre-0.2 default-branch bridge and disabled
+  publication pending privacy, consumer, and reviewed release evidence.
 
 ## 0.0.0
 
