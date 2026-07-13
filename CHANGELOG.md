@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.0-beta.3 - Unreleased
+## 0.1.0-beta.4 - 2026-07-13
+
+- Restored the independently reviewed public source after the temporary
+  default-branch quarantine and repinned CI to the current governance workflow.
+- Minted a new prerelease identity so the superseded beta.3 candidate bytes are
+  never reused for npm publication.
+
+## 0.1.0-beta.3 - Superseded local candidate
 
 - Prepared the independently reviewed privacy-safe source for protected public
   `main` with SHA-pinned CI, public API governance, clean-source artifact
@@ -56,10 +63,6 @@
   lint, clean-room, and immutable artifact tooling.
 - Made `invest-runtime` the first real consumer through a body-free
   transport-safe analytics adapter.
-## Unreleased
-
-- Quarantined the unsupported pre-0.2 default-branch bridge and disabled
-  publication pending privacy, consumer, and reviewed release evidence.
 
 ## 0.0.0
 

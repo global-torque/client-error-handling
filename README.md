@@ -1,31 +1,15 @@
 # @global-torque/client-error-handling
 
-> **Public 0.1 beta candidate:** the source is under review. Do not install a
-> mutable branch or reuse the earlier dirty-tree beta.2 artifact. Promotion
-> requires the protected-tag beta.3 asset and the private runtime/staging gate.
+> **Public prerelease:** `0.1.0-beta.4` is the first npm-published candidate.
+> Pin the exact version while the 0.1 contract remains in beta.
 
 Framework-free, transport-safe client error normalization, sanitization,
 dedupe, reporters, and bounded reporting orchestration.
-> [!CAUTION]
-> This default-branch source is a quarantined pre-0.2 bridge, not an approved
-> release candidate. Do not install it from GitHub, a branch, or npm. Use only
-> a future immutable prerelease asset after its checksum, consumer evidence,
-> and public release review are complete.
-
-Prepare-next framework-free client error handling core.
-
-This package is reserved for the public `@global-torque/client-error-handling`
-surface. It is not a publication approval by itself: public release remains
-blocked until host adapters, staging telemetry evidence, clean
-consumer checks, and release gates pass.
 
 ## Installation and compatibility
 
-Approved consumers install the reviewed immutable GitHub beta asset. No npm
-registry version exists yet; after registry promotion the equivalent command is:
-
 ```sh
-pnpm add @global-torque/client-error-handling@0.1.0-beta.N
+pnpm add @global-torque/client-error-handling@0.1.0-beta.4
 ```
 
 | Contract         | Supported                         |
@@ -222,5 +206,3 @@ Run `pnpm run format:check`, `pnpm run lint`, `pnpm run typecheck`,
 reports use GitHub private vulnerability reporting. Feature requests and
 reproducible bugs belong in
 <https://github.com/global-torque/client-error-handling/issues>.
-Prepare-next. Do not publish to npm until the public release gates for the error
-package track are complete.
