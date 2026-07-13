@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a cohesive public capability
+title: 'proposal: '
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: External user problem
+      description: Explain the problem without relying on private product context.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed public contract
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and compatibility impact
+    validations:
+      required: true
