@@ -81,6 +81,14 @@ jobs:
             sleep 5
           done
           exit 1
+      - name: Normalize attestation bundle filename
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          bundles=(release/sha512:*.jsonl)
+          test "${#bundles[@]}" -eq 1
+          mv "${bundles[0]}" "${bundles[0]/sha512:/sha512-}"
       - name: Verify offline attestation identity and provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,6 +110,24 @@ jobs:
             --source-ref "${GITHUB_REF}" \
             --deny-self-hosted-runners \
             --format json > /dev/null
+      - name: Identify npm provenance subject
+        id: npm-subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('package.json','utf8')); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'name=pkg:npm/'+p.name.replace('@','%40')+'@'+p.version+'\n');"
+          digest=$(awk '{print $1}' release/*.tgz.sha512)
+          printf 'digest=sha512:%s\n' "${digest}" >> "${GITHUB_OUTPUT}"
+      - name: Attest npm package identity
+        id: npm-provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-name: ${{ steps.npm-subject.outputs.name }}
+          subject-digest: ${{ steps.npm-subject.outputs.digest }}
+      - name: Retain npm provenance bundle
+        env:
+          BUNDLE_PATH: ${{ steps.npm-provenance.outputs.bundle-path }}
+        run: cp "${BUNDLE_PATH}" release/npm-provenance.json
       - name: Retain exact candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -144,8 +170,8 @@ jobs:
       - name: Verify installed bytes and all public imports
         run: node scripts/verify-installed-artifact.mjs release "${{ matrix.manager }}"
 
-  draft-prerelease:
-    name: Create immutable draft prerelease
+  release:
+    name: Retain reviewed release
     needs:
       - build
       - clean-room
@@ -162,7 +188,7 @@ jobs:
         with:
           name: candidate-${{ github.sha }}
           path: release
-      - name: Create draft prerelease
+      - name: Create versioned release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -170,9 +196,12 @@ jobs:
           set -euo pipefail
           version=$(node -p "require('./package.json').version")
           test "v${version}" = "${GITHUB_REF_NAME}"
+          release_flags=(--draft --prerelease)
+          if [[ "${version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            release_flags=()
+          fi
           gh release create "${GITHUB_REF_NAME}" release/* \
-            --draft \
-            --prerelease \
+            "${release_flags[@]}" \
             --verify-tag \
             --title "${GITHUB_REF_NAME}" \
-            --notes "Immutable candidate from ${GITHUB_SHA}. Publish this draft only after the named real-consumer gate and public release issue are complete."
+            --notes "Verified artifact from ${GITHUB_SHA}. Ordinary-version tags authorize a public release after package and clean-room gates; prerelease tags remain drafts pending review."
