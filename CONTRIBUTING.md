@@ -35,11 +35,11 @@ The candidate workflow builds and packs once, runs the package and installed
 artifact gates, and retains the exact archive, checksums, manifest, and hosted
 build attestation in a draft prerelease. Every tag follows this draft path.
 
-For an ordinary version, dispatch the npm provenance workflow at that same tag
-(after its candidate workflow succeeds):
+For an ordinary version, dispatch the npm provenance workflow from protected main
+for that release tag (after its candidate workflow succeeds):
 
 ```sh
-gh workflow run npm-provenance.yml --ref v0.1.0 -f release_tag=v0.1.0
+gh workflow run npm-provenance.yml --ref main -f release_tag=v0.1.0
 ```
 
 Replace the example with the package version being released. The workflow
@@ -54,3 +54,8 @@ draft as an ordinary GitHub release. Publish those same archive bytes to npm wit
 `npm publish <archive.tgz> --access public --provenance-file <npm-provenance.json>`.
 Keep the original build attestation alongside the npm identity bundle. npm
 credentials remain outside these workflows.
+
+The npm identity workflow runs from protected main and checks out the selected
+release tag explicitly. Its signature identifies the reviewed workflow revision;
+the retained candidate signature and manifest identify the original package
+source revision. Both signatures must verify before publication.
