@@ -1,0 +1,127 @@
+name: npm provenance for retained candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Ordinary version tag for the retained draft release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-provenance-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  attest:
+    name: Verify retained candidate and attest npm identity
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.0
+      - name: Verify ordinary tag and download retained draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "${GITHUB_REF}" = "refs/tags/${RELEASE_TAG}"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "v$(node -p "require('./package.json').version")" = "${RELEASE_TAG}"
+          gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --json isDraft,tagName,assets > "${RUNNER_TEMP}/npm-release.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const release = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/npm-release.json`, 'utf8'));
+          assert.equal(release.isDraft, true, 'The retained release must still be a draft');
+          assert.equal(release.tagName, process.env.RELEASE_TAG);
+          assert.equal(release.assets.some(({ name }) => name === 'npm-provenance.json'), false, 'npm provenance already exists; do not replace it');
+          NODE
+          mkdir release
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --dir release \
+            --pattern '*.tgz' \
+            --pattern '*.tgz.manifest.json' \
+            --pattern '*.tgz.sha512' \
+            --pattern 'sha512-*.jsonl'
+      - name: Verify retained source and checksums
+        id: subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const artifact = `${pkg.name.replace(/^@/, '').replace('/', '-')}-${pkg.version}.tgz`;
+          const manifest = JSON.parse(fs.readFileSync(`release/${artifact}.manifest.json`, 'utf8'));
+          assert.equal(manifest.schemaVersion, 1);
+          assert.equal(manifest.sourceCommit, process.env.GITHUB_SHA);
+          assert.equal(manifest.sourceDirty, false);
+          assert.equal(manifest.package, pkg.name);
+          assert.equal(manifest.version, pkg.version);
+          assert.equal(manifest.artifact, artifact);
+          const digest = crypto.createHash('sha512').update(fs.readFileSync(`release/${artifact}`)).digest();
+          const sha512 = digest.toString('hex');
+          assert.equal(manifest.sha512, sha512);
+          assert.equal(manifest.integrity, `sha512-${digest.toString('base64')}`);
+          assert.equal(fs.readFileSync(`release/${artifact}.sha512`, 'utf8'), `${sha512}  ${artifact}\n`);
+          const bundle = `sha512-${sha512}.jsonl`;
+          assert.deepEqual(fs.readdirSync('release').sort(), [artifact, `${artifact}.manifest.json`, `${artifact}.sha512`, bundle].sort());
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact=release/${artifact}\nbundle=release/${bundle}\nname=pkg:npm/${pkg.name.replace(/^@/, '%40')}@${pkg.version}\ndigest=sha512:${sha512}\n`);
+          NODE
+      - name: Verify original hosted candidate attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_PATH: ${{ steps.subject.outputs.artifact }}
+          BUNDLE_PATH: ${{ steps.subject.outputs.bundle }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh attestation verify "${ARTIFACT_PATH}" \
+            --bundle "${BUNDLE_PATH}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --digest-alg sha512 \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/candidate.yml" \
+            --signer-digest "${GITHUB_SHA}" \
+            --source-digest "${GITHUB_SHA}" \
+            --source-ref "${GITHUB_REF}" \
+            --deny-self-hosted-runners \
+            --format json > /dev/null
+      - name: Attest npm package identity
+        id: npm-provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-name: ${{ steps.subject.outputs.name }}
+          subject-digest: ${{ steps.subject.outputs.digest }}
+      - name: Attach npm provenance to retained draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_PATH: ${{ steps.npm-provenance.outputs.bundle-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')" = true
+          cp "${BUNDLE_PATH}" "${RUNNER_TEMP}/npm-provenance.json"
+          gh release upload "${RELEASE_TAG}" "${RUNNER_TEMP}/npm-provenance.json" \
+            --repo "${GITHUB_REPOSITORY}"

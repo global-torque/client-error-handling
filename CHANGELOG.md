@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0 - 2026-09-09
+
+- Release the reviewed public package with an ordinary version on npm.
+- Preserve the public API and behavior from 0.1.0-beta.4.
+- Resolve dependency advisories in fast-uri, brace-expansion, js-yaml,
+  nanoid, PostCSS, and Vitest using compatible patched versions.
+
 ## 0.1.0-beta.4 - 2026-07-13
 
 - Restored the independently reviewed public source after the temporary

@@ -28,3 +28,29 @@ available at <https://developercertificate.org/>.
 
 Security reports must use GitHub private vulnerability reporting, not a public
 issue.
+
+## Retained release and npm provenance
+
+The candidate workflow builds and packs once, runs the package and installed
+artifact gates, and retains the exact archive, checksums, manifest, and hosted
+build attestation in a draft prerelease. Every tag follows this draft path.
+
+For an ordinary version, dispatch the npm provenance workflow at that same tag
+(after its candidate workflow succeeds):
+
+```sh
+gh workflow run npm-provenance.yml --ref v0.1.0 -f release_tag=v0.1.0
+```
+
+Replace the example with the package version being released. The workflow
+requires the matching tag and a still-draft release. It checks the source commit,
+archive hashes, and original hosted candidate attestation before signing the
+single npm package identity and attaching `npm-provenance.json`. It never
+rebuilds the package, replaces an existing bundle, or publishes the release.
+
+A maintainer verifies the retained archive and both attestations, completes the
+named real-consumer gate and public release issue, then publishes the reviewed
+draft as an ordinary GitHub release. Publish those same archive bytes to npm with
+`npm publish <archive.tgz> --access public --provenance-file <npm-provenance.json>`.
+Keep the original build attestation alongside the npm identity bundle. npm
+credentials remain outside these workflows.

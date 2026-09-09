@@ -156,7 +156,7 @@ const EXPECTED_EXPORT_SUBPATHS = new Map([
 ]);
 const EXPECTED_PACKAGE_VERSIONS = new Map([
   ['@global-torque/admin-toolkit', '0.2.0-beta.2'],
-  ['@global-torque/client-error-handling', '0.1.0-beta.4'],
+  ['@global-torque/client-error-handling', '0.1.0'],
   ['@global-torque/content-toolkit', '0.2.0-beta.7'],
   ['@global-torque/design-tokens', '0.1.0-beta.2'],
   ['@global-torque/markdown-it-wikilinks', '0.2.0-beta.3'],
@@ -705,7 +705,7 @@ function validateManifest(root, options) {
       .readFileSync(workspacePath, 'utf8')
       .replaceAll('\r\n', '\n');
     const expectedWorkspace = WORKSPACE_OVERRIDE_PACKAGES.has(manifest.name)
-      ? /^packages:\n {2}- \.\noverrides:\n {2}(?:'js-yaml@4\.1\.1'|"js-yaml@4\.1\.1"|js-yaml@4\.1\.1): 4\.3\.0\n?$/
+      ? /^packages:\n {2}- \.\noverrides:\n {2}'js-yaml@\^4': 4\.3\.2\n {2}'fast-uri@\^3': 3\.1\.6\n {2}'brace-expansion@\^1': 1\.1\.18\n {2}'brace-expansion@\^5': 5\.0\.9\n$/
       : /^packages:\n {2}- \.\n?$/;
     if (!expectedWorkspace.test(workspace)) {
       throw new Error(

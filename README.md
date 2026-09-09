@@ -1,7 +1,6 @@
 # @global-torque/client-error-handling
 
-> **Public prerelease:** `0.1.0-beta.4` is the first npm-published candidate.
-> Pin the exact version while the 0.1 contract remains in beta.
+> **Public release:** `0.1.0`. Install the versioned package from npm.
 
 Framework-free, transport-safe client error normalization, sanitization,
 dedupe, reporters, and bounded reporting orchestration.
@@ -9,7 +8,7 @@ dedupe, reporters, and bounded reporting orchestration.
 ## Installation and compatibility
 
 ```sh
-pnpm add @global-torque/client-error-handling@0.1.0-beta.4
+pnpm add @global-torque/client-error-handling@0.1.0
 ```
 
 | Contract         | Supported                         |
